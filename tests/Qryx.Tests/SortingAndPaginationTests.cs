@@ -30,11 +30,13 @@ public class SortingAndPaginationTests
         public string Title { get; set; } = string.Empty;
     }
 
-    [Sortable(nameof(Name))]
     public class WhitelistedEntity
     {
         public int Id { get; set; }
+
+        [Sortable]
         public string Name { get; set; } = string.Empty;
+
         public string SecretNote { get; set; } = string.Empty;
     }
 
@@ -195,6 +197,21 @@ public class SortingAndPaginationTests
         // When throwOnInvalidProperty is false, it safely ignores unwhitelisted field and leaves original
         var ignored = SortBuilder.Apply(data, "SecretNote", isDescending: false, throwOnInvalidProperty: false);
         Assert.NotNull(ignored);
+    }
+
+    [Fact]
+    public void Sortable_IsSingleSourceOfTruth_UnannotatedProperty_CannotBeSorted()
+    {
+        var data = new List<StandardUser>
+        {
+            new() { Id = 2, Name = "B", Age = 30 },
+            new() { Id = 1, Name = "A", Age = 20 },
+        }.AsQueryable();
+
+        // StandardUser has NO [Sortable] attributes on any property.
+        // Therefore, sorting by "Age" must be rejected!
+        Assert.Throws<ArgumentException>(() =>
+            SortBuilder.Apply(data, "Age", isDescending: false, throwOnInvalidProperty: true));
     }
 
     [Fact]

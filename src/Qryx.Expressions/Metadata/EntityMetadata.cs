@@ -23,16 +23,9 @@ public sealed class EntityMetadata
         var dict = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
         var sortableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. [Sortable] on entity class
-        foreach (var attr in entityType.GetCustomAttributes<SortableAttribute>(inherit: true))
-        {
-            foreach (var p in attr.AllowedProperties)
-                sortableSet.Add(p);
-        }
-
         foreach (var prop in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (prop.CanRead && !prop.IsDefined(typeof(NotSortableAttribute), inherit: true))
+            if (prop.CanRead)
             {
                 dict[prop.Name] = prop;
 
@@ -95,7 +88,7 @@ public sealed class EntityMetadata
             foreach (var part in parts)
             {
                 var prop = currentType.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (prop == null || !prop.CanRead || prop.IsDefined(typeof(NotSortableAttribute), inherit: true))
+                if (prop == null || !prop.CanRead)
                     return null;
 
                 lastProp = prop;

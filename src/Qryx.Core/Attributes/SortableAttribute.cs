@@ -1,22 +1,25 @@
 namespace Qryx.Core.Attributes;
 
 /// <summary>
-/// Explicitly permits sorting on an entity property, DTO property, or DTO class.
-/// Implements secure-by-default Opt-in (Whitelist) access control.
-/// Only properties marked with this attribute or specified in the whitelist can be sorted.
+/// Explicitly permits sorting on an entity or DTO property.
+/// Implements secure-by-default Opt-In access control.
+/// Sortable attribute is the single source of truth for sorting:
+/// only properties marked with this attribute can be sorted by external client queries.
 /// </summary>
-[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class, AllowMultiple = true, Inherited = true)]
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
 public sealed class SortableAttribute : Attribute
 {
-    public string[] AllowedProperties { get; }
+    /// <summary>
+    /// Optional target property name on the underlying entity (if different from the DTO property name).
+    /// </summary>
+    public string? TargetProperty { get; }
 
     public SortableAttribute()
     {
-        AllowedProperties = Array.Empty<string>();
     }
 
-    public SortableAttribute(params string[] allowedProperties)
+    public SortableAttribute(string targetProperty)
     {
-        AllowedProperties = allowedProperties ?? Array.Empty<string>();
+        TargetProperty = targetProperty;
     }
 }

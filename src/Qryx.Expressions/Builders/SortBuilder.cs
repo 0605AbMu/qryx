@@ -99,31 +99,25 @@ public static class SortBuilder
         if (!entityMetadata.HasProperty(propertyName))
             return false;
 
-        // Primary key (e.g. "Id" or EntityId) is ALWAYS permitted for deterministic pagination & keyset cursor
-        if (string.Equals(propertyName, entityMetadata.PrimaryKeyProperty?.Name, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(propertyName, "Id", StringComparison.OrdinalIgnoreCase))
+        // 1. Check DTO properties with [Sortable]
+        if (dtoType != null)
+        {
+            var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
+            if (dtoMetadata.SortableProperties.Contains(propertyName))
+            {
+                return true;
+            }
+        }
+
+        // 2. Check Entity properties with [Sortable]
+        if (entityMetadata.SortableProperties.Contains(propertyName))
         {
             return true;
         }
 
-        // 1. Check DTO Opt-in whitelist
-        if (dtoType != null)
-        {
-            var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
-            if (dtoMetadata.SortableProperties.Count > 0)
-            {
-                return dtoMetadata.SortableProperties.Contains(propertyName);
-            }
-        }
-
-        // 2. Check Entity Opt-in whitelist
-        if (entityMetadata.SortableProperties.Count > 0)
-        {
-            return entityMetadata.SortableProperties.Contains(propertyName);
-        }
-
-        // 3. Fallback: If no [Sortable] was defined anywhere on DTO or Entity, allow property
-        return true;
+        // Sortable is the single source of truth:
+        // If neither DTO nor Entity property has [Sortable], sorting by this property is not allowed.
+        return false;
     }
 
     /// <summary>

@@ -95,21 +95,14 @@ public static class MetadataCache
         }
 
         var sortableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var attr in dtoType.GetCustomAttributes<SortableAttribute>(inherit: true))
-        {
-            foreach (var p in attr.AllowedProperties)
-                sortableSet.Add(p);
-        }
-
         foreach (var prop in properties)
         {
             if (prop.IsDefined(typeof(SortableAttribute), inherit: true))
             {
                 var sortAttr = prop.GetCustomAttribute<SortableAttribute>(inherit: true);
-                if (sortAttr?.AllowedProperties != null && sortAttr.AllowedProperties.Length > 0)
+                if (!string.IsNullOrWhiteSpace(sortAttr?.TargetProperty))
                 {
-                    foreach (var ap in sortAttr.AllowedProperties)
-                        sortableSet.Add(ap);
+                    sortableSet.Add(sortAttr.TargetProperty);
                 }
 
                 var filterAttr = prop.GetCustomAttribute<FilterAttribute>(inherit: true);
