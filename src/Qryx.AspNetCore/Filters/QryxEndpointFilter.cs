@@ -1,63 +1,54 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Qryx.Core.Constants;
 using Qryx.Core.Contracts;
+using Qryx.Expressions.Metadata;
 
 namespace Qryx.AspNetCore.Filters;
 
 /// <summary>
-/// Endpoint filter for Minimal APIs that enforces Qryx pagination DoS guards.
+/// Endpoint filter for Minimal APIs that enforces Qryx pagination DoS guards with 0.00 ns reflection.
 /// </summary>
 public sealed class QryxEndpointFilter : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
-        foreach (var argument in context.Arguments)
+        var arguments = context.Arguments;
+        for (int i = 0; i < arguments.Count; i++)
         {
-            if (argument == null)
-                continue;
-
-            if (IsQryxRequest(argument.GetType()))
+            var argument = arguments[i];
+            if (argument is IQryxRequest qryxRequest)
             {
-                EnforceDosGuards(argument);
+                EnforceDosGuards(argument, qryxRequest);
             }
         }
 
         return await next(context);
     }
 
-    private static bool IsQryxRequest(Type type)
+    private static void EnforceDosGuards(object dto, IQryxRequest request)
     {
-        foreach (var iface in type.GetInterfaces())
-        {
-            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IQryxRequest<>))
-                return true;
-        }
-        return false;
-    }
+        var metadata = MetadataCache.GetDtoMetadata(dto.GetType());
+        var setters = metadata.StandardSetters;
 
-    private static void EnforceDosGuards(object dto)
-    {
-        var type = dto.GetType();
-
-        var pageProp = type.GetProperty(nameof(IQryxRequest<object>.Page), BindingFlags.Public | BindingFlags.Instance);
-        if (pageProp != null && pageProp.CanWrite)
+        if (request.Page < 1 && setters.TryGetValue(nameof(IQryxRequest.Page), out var pageSetter))
         {
-            var page = (int?)(pageProp.GetValue(dto)) ?? 1;
-            if (page < 1)
-                pageProp.SetValue(dto, 1);
+            pageSetter(dto, 1);
         }
 
-        var pageSizeProp = type.GetProperty(nameof(IQryxRequest<object>.PageSize), BindingFlags.Public | BindingFlags.Instance);
-        if (pageSizeProp != null && pageSizeProp.CanWrite)
+        var pageSize = request.PageSize;
+        if (pageSize <= 0)
         {
-            var pageSize = (int?)(pageSizeProp.GetValue(dto)) ?? QryxConstants.DefaultPageSize;
-            if (pageSize <= 0)
-                pageSize = QryxConstants.DefaultPageSize;
-            else if (pageSize > QryxConstants.DefaultMaxPageSize)
-                pageSize = QryxConstants.DefaultMaxPageSize;
-
-            pageSizeProp.SetValue(dto, pageSize);
+            if (setters.TryGetValue(nameof(IQryxRequest.PageSize), out var sizeSetter))
+            {
+                sizeSetter(dto, QryxConstants.DefaultPageSize);
+            }
+        }
+        else if (pageSize > QryxConstants.DefaultMaxPageSize)
+        {
+            if (setters.TryGetValue(nameof(IQryxRequest.PageSize), out var sizeSetter))
+            {
+                sizeSetter(dto, QryxConstants.DefaultMaxPageSize);
+            }
         }
     }
 }

@@ -17,7 +17,8 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
     {
         ArgumentNullException.ThrowIfNull(bindingContext);
 
-        var dto = Activator.CreateInstance(dtoType);
+        var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
+        var dto = dtoMetadata.Factory();
         if (dto == null)
         {
             bindingContext.Result = ModelBindingResult.Failed();
@@ -25,7 +26,6 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         }
 
         var valueProvider = bindingContext.ValueProvider;
-        var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
 
         // Bind standard request properties
         BindStandardProperties(dto, dtoMetadata, valueProvider);
@@ -37,7 +37,7 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
 
             if (filter.IsCollection && filter.CollectionElementType != null)
             {
-                var colVal = BindCollection(propName, filter.CollectionElementType, valueProvider);
+                var colVal = BindCollection(propName, filter, valueProvider);
                 if (colVal != null)
                 {
                     filter.Setter?.Invoke(dto, colVal);
@@ -106,14 +106,16 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         }
     }
 
-    private static object? BindCollection(string propName, Type elementType, IValueProvider valueProvider)
+    private static object? BindCollection(string propName, FilterPropertyMetadata filter, IValueProvider valueProvider)
     {
         var rawResult = valueProvider.GetValue(propName);
         if (rawResult == ValueProviderResult.None || rawResult.Values.Count == 0)
             return null;
 
-        var listType = typeof(List<>).MakeGenericType(elementType);
-        var list = (IList)Activator.CreateInstance(listType)!;
+        var elementType = filter.CollectionElementType!;
+        var list = filter.CollectionFactory != null
+            ? filter.CollectionFactory()
+            : (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
 
         foreach (var val in rawResult.Values)
         {

@@ -49,6 +49,17 @@ public static class MetadataCache
             var getter = CompileGetter(dtoType, prop);
             var setter = CompileSetter(dtoType, prop);
 
+            Func<IList>? colFactory = null;
+            if (isCollection && collectionElementType != null)
+            {
+                var listType = typeof(List<>).MakeGenericType(collectionElementType);
+                var listCtor = listType.GetConstructor(Type.EmptyTypes);
+                if (listCtor != null)
+                {
+                    colFactory = Expression.Lambda<Func<IList>>(Expression.New(listCtor)).Compile();
+                }
+            }
+
             IReadOnlyList<string> targetPaths;
             if (filterAttr.TargetProperties != null && filterAttr.TargetProperties.Length > 0)
             {
@@ -74,7 +85,8 @@ public static class MetadataCache
                 Getter = getter,
                 Setter = setter,
                 IsCollection = isCollection,
-                CollectionElementType = collectionElementType
+                CollectionElementType = collectionElementType,
+                CollectionFactory = colFactory
             });
         }
 
@@ -123,9 +135,15 @@ public static class MetadataCache
             }
         }
 
+        var ctor = dtoType.GetConstructor(Type.EmptyTypes);
+        Func<object> factory = ctor != null
+            ? Expression.Lambda<Func<object>>(Expression.New(ctor)).Compile()
+            : () => Activator.CreateInstance(dtoType)!;
+
         return new DtoMetadata
         {
             DtoType = dtoType,
+            Factory = factory,
             Filters = filterProps,
             SortableProperties = sortableSet,
             StandardSetters = standardSetters

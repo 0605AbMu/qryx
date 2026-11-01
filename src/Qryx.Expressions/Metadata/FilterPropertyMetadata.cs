@@ -29,4 +29,5 @@ public sealed class FilterPropertyMetadata
 
     public required bool IsCollection { get; init; }
     public Type? CollectionElementType { get; init; }
+    public Func<System.Collections.IList>? CollectionFactory { get; init; }
 }

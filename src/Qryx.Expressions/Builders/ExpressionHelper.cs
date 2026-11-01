@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace Qryx.Expressions.Builders;
 
@@ -32,7 +33,7 @@ public static class ExpressionHelper
     private static readonly Lazy<Expression?> EfFunctionsExpr = new(FindEfFunctionsInstance);
 
     private static readonly ConcurrentDictionary<(Type Type, string Path), PropertyInfo[]> PropertyChainCache = new();
-    private static readonly ConcurrentDictionary<Type, Func<IQueryProvider, bool>> ProviderInspectorCache = new();
+    private static readonly ConditionalWeakTable<IQueryProvider, StrongBox<bool>> ProviderCache = new();
 
     public static Expression BuildMemberAccess(Expression parameter, string propertyPath)
     {
@@ -127,47 +128,45 @@ public static class ExpressionHelper
     {
         if (provider == null) return false;
 
-        var inspector = ProviderInspectorCache.GetOrAdd(provider.GetType(), static pType =>
+        if (ProviderCache.TryGetValue(provider, out var cached))
         {
-            try
-            {
-                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-                var compilerField = pType.GetField("_queryCompiler", flags);
-                if (compilerField == null) return _ => false;
+            return cached.Value;
+        }
 
-                return p =>
-                {
-                    try
-                    {
-                        var compiler = compilerField.GetValue(p);
-                        if (compiler == null) return false;
+        var isPostgres = InspectIsPostgreSql(provider);
+        ProviderCache.AddOrUpdate(provider, new StrongBox<bool>(isPostgres));
+        return isPostgres;
+    }
 
-                        var compilerType = compiler.GetType();
-                        var genField = compilerType.GetField("_compiledQueryCacheKeyGenerator", flags);
-                        var generator = genField?.GetValue(compiler);
-                        if (generator != null && generator.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
-                            return true;
+    private static bool InspectIsPostgreSql(IQueryProvider provider)
+    {
+        try
+        {
+            var pType = provider.GetType();
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var compilerField = pType.GetField("_queryCompiler", flags);
+            if (compilerField == null) return false;
 
-                        var evalField = compilerType.GetField("_evaluatableExpressionFilter", flags);
-                        var evalFilter = evalField?.GetValue(compiler);
-                        if (evalFilter != null && evalFilter.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
-                            return true;
+            var compiler = compilerField.GetValue(provider);
+            if (compiler == null) return false;
 
-                        return compilerType.FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                };
-            }
-            catch
-            {
-                return _ => false;
-            }
-        });
+            var compilerType = compiler.GetType();
+            var genField = compilerType.GetField("_compiledQueryCacheKeyGenerator", flags);
+            var generator = genField?.GetValue(compiler);
+            if (generator != null && generator.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
 
-        return inspector(provider);
+            var evalField = compilerType.GetField("_evaluatableExpressionFilter", flags);
+            var evalFilter = evalField?.GetValue(compiler);
+            if (evalFilter != null && evalFilter.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+
+            return compilerType.FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static Expression BuildStartsWith(

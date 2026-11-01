@@ -65,12 +65,14 @@ public static class SortBuilder
         // Support multiple comma-separated fields: e.g. "CreatedAt desc, Name asc" or single field
         var sortClauses = ClauseCache.GetOrAdd((sortBy, isDescending), static k => ParseSortClauses(k.SortBy, k.Descending));
 
+        var dtoMetadata = dtoType != null ? MetadataCache.GetDtoMetadata(dtoType) : null;
         IOrderedQueryable<TEntity>? orderedQuery = null;
         bool isFirst = true;
 
-        foreach (var clause in sortClauses)
+        for (int i = 0; i < sortClauses.Length; i++)
         {
-            if (!IsPropertySortable<TEntity>(clause.PropertyName, dtoType, entityMetadata))
+            var clause = sortClauses[i];
+            if (!IsPropertySortable(clause.PropertyName, dtoMetadata, entityMetadata))
             {
                 if (throwOnInvalidProperty)
                 {
@@ -96,17 +98,19 @@ public static class SortBuilder
 
     public static bool IsPropertySortable<TEntity>(string propertyName, Type? dtoType, EntityMetadata entityMetadata)
     {
+        var dtoMetadata = dtoType != null ? MetadataCache.GetDtoMetadata(dtoType) : null;
+        return IsPropertySortable(propertyName, dtoMetadata, entityMetadata);
+    }
+
+    public static bool IsPropertySortable(string propertyName, DtoMetadata? dtoMetadata, EntityMetadata entityMetadata)
+    {
         if (!entityMetadata.HasProperty(propertyName))
             return false;
 
         // 1. Check DTO properties with [Sortable]
-        if (dtoType != null)
+        if (dtoMetadata != null && dtoMetadata.SortableProperties.Contains(propertyName))
         {
-            var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
-            if (dtoMetadata.SortableProperties.Contains(propertyName))
-            {
-                return true;
-            }
+            return true;
         }
 
         // 2. Check Entity properties with [Sortable]

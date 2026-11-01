@@ -100,4 +100,28 @@ public sealed class EntityMetadata
     }
 
     public bool HasProperty(string propertyPath) => ResolveProperty(propertyPath) != null;
+
+    private readonly ConcurrentDictionary<string, Func<object, object?>?> _getterCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets a pre-compiled, zero-reflection delegate for extracting property values from entity instances.
+    /// </summary>
+    public Func<object, object?>? GetFastPropertyGetter(string propertyPath)
+    {
+        if (string.IsNullOrWhiteSpace(propertyPath))
+            return null;
+
+        return _getterCache.GetOrAdd(propertyPath, path =>
+        {
+            var prop = ResolveProperty(path);
+            if (prop == null || !prop.CanRead)
+                return null;
+
+            var param = System.Linq.Expressions.Expression.Parameter(typeof(object), "obj");
+            var cast = System.Linq.Expressions.Expression.Convert(param, EntityType);
+            var member = System.Linq.Expressions.Expression.Property(cast, prop);
+            var box = System.Linq.Expressions.Expression.Convert(member, typeof(object));
+            return System.Linq.Expressions.Expression.Lambda<Func<object, object?>>(box, param).Compile();
+        });
+    }
 }

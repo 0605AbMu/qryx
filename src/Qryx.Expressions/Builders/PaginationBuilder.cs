@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using Qryx.Core.Constants;
 using Qryx.Core.Contracts;
@@ -10,6 +11,8 @@ namespace Qryx.Expressions.Builders;
 /// </summary>
 public static class PaginationBuilder
 {
+    private static readonly ConcurrentDictionary<(Type EntityType, string PropName, bool IsDescending), Func<object, Expression>> KeysetPredicateFactoryCache = new();
+
     public static int ClampPageSize(int pageSize, int maxPageSize = QryxConstants.DefaultMaxPageSize)
     {
         if (pageSize <= 0)
@@ -79,15 +82,24 @@ public static class PaginationBuilder
         var propInfo = entityMetadata.ResolveProperty(propName)
                        ?? throw new InvalidOperationException($"Cursor property '{propName}' was not found on '{typeof(TEntity).Name}'.");
 
-        var parameter = Expression.Parameter(typeof(TEntity), "x");
-        var member = ExpressionHelper.BuildMemberAccess(parameter, propName);
-        var constant = ExpressionHelper.BuildConstantExpression(afterCursor, member.Type);
+        var factory = KeysetPredicateFactoryCache.GetOrAdd((typeof(TEntity), propName, isDescending), static key =>
+        {
+            var (entityType, pName, desc) = key;
+            var parameter = Expression.Parameter(entityType, "x");
+            var member = ExpressionHelper.BuildMemberAccess(parameter, pName);
+            var memberType = member.Type;
 
-        var comparison = isDescending
-            ? Expression.LessThan(member, constant)
-            : Expression.GreaterThan(member, constant);
+            return cursorVal =>
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(cursorVal, memberType);
+                var comparison = desc
+                    ? Expression.LessThan(member, constant)
+                    : Expression.GreaterThan(member, constant);
+                return Expression.Lambda(comparison, parameter);
+            };
+        });
 
-        var filterLambda = Expression.Lambda<Func<TEntity, bool>>(comparison, parameter);
+        var filterLambda = (Expression<Func<TEntity, bool>>)factory(afterCursor);
         var filtered = source.Where(filterLambda);
 
         // Apply ordering by cursor directly

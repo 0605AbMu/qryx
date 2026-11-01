@@ -1,19 +1,42 @@
 namespace Qryx.Core.Contracts;
 
 /// <summary>
+/// Non-generic base contract for query requests.
+/// Allows zero-reflection polymorphic binding, inspection, and filter execution.
+/// </summary>
+public interface IQryxRequest
+{
+    int Page { get; }
+    int PageSize { get; }
+    object? AfterCursor { get; }
+    string? CursorProperty => null;
+    string? SortBy { get; }
+    bool IsDescending { get; }
+    bool IncludeTotalCount => true;
+}
+
+/// <summary>
 /// Contract for query requests targeting an entity type.
 /// Encapsulates pagination, cursor, and sorting parameters.
 /// </summary>
 /// <typeparam name="TEntity">Target entity type.</typeparam>
-public interface IQryxRequest<TEntity>
+public interface IQryxRequest<TEntity> : IQryxRequest
 {
-    int Page { get; init; }
-    int PageSize { get; init; }
-    object? AfterCursor { get; init; }
-    string? CursorProperty => null;
-    string? SortBy { get; init; }
-    bool IsDescending { get; init; }
-    bool IncludeTotalCount => true;
+    new int Page { get; init; }
+    new int PageSize { get; init; }
+    new object? AfterCursor { get; init; }
+    new string? CursorProperty => null;
+    new string? SortBy { get; init; }
+    new bool IsDescending { get; init; }
+    new bool IncludeTotalCount => true;
+
+    int IQryxRequest.Page => Page;
+    int IQryxRequest.PageSize => PageSize;
+    object? IQryxRequest.AfterCursor => AfterCursor;
+    string? IQryxRequest.CursorProperty => CursorProperty;
+    string? IQryxRequest.SortBy => SortBy;
+    bool IQryxRequest.IsDescending => IsDescending;
+    bool IQryxRequest.IncludeTotalCount => IncludeTotalCount;
 }
 
 /// <summary>

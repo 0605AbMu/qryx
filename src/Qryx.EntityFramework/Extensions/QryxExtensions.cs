@@ -5,6 +5,7 @@ using Qryx.Core.Contracts;
 using Qryx.EntityFramework.Models;
 using Qryx.Expressions.Builders;
 using Qryx.Expressions.Metadata;
+using Qryx.Expressions.Options;
 
 namespace Qryx.EntityFramework.Extensions;
 
@@ -25,7 +26,13 @@ public static class QryxExtensions
 
         source = FilterBuilder.Apply(source, request);
         source = SortBuilder.Apply(source, request);
-        return source.TagWith($"Qryx: {request.GetType().Name}");
+
+        if (QryxOptions.EnableQueryTagging)
+        {
+            source = source.TagWith($"Qryx: {request.GetType().Name}");
+        }
+
+        return source;
     }
 
     /// <summary>
@@ -66,11 +73,12 @@ public static class QryxExtensions
             object? nextCursor = null;
             if (items.Count > 0)
             {
+                var entityMetadata = MetadataCache.GetEntityMetadata<TEntity>();
                 var cursorProp = request.CursorProperty
-                                 ?? MetadataCache.GetEntityMetadata<TEntity>().PrimaryKeyProperty?.Name
+                                 ?? entityMetadata.PrimaryKeyProperty?.Name
                                  ?? "Id";
-                var propInfo = MetadataCache.GetEntityMetadata<TEntity>().ResolveProperty(cursorProp);
-                nextCursor = propInfo?.GetValue(items[^1]);
+                var getter = entityMetadata.GetFastPropertyGetter(cursorProp);
+                nextCursor = getter != null ? getter(items[^1]!) : null;
             }
 
             return new PagedResult<TEntity>
