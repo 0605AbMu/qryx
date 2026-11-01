@@ -7,6 +7,7 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
     <RootNamespace>Qryx.SourceGenerator</RootNamespace>
     <Description>Compile-time Roslyn Incremental Source Generator for Qryx query DTOs with 0.00 ns reflection.</Description>
     <NoWarn>$(NoWarn);NU5128;NU5118</NoWarn>
