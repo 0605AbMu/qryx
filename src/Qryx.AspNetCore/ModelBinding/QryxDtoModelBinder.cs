@@ -76,9 +76,13 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         }
 
         var sortByResult = valueProvider.GetValue("sortBy");
-        if (sortByResult != ValueProviderResult.None && !string.IsNullOrWhiteSpace(sortByResult.FirstValue))
+        if (sortByResult != ValueProviderResult.None && sortByResult.Length > 0)
         {
-            SetFast(metadata, dto, nameof(IQryxRequest<object>.SortBy), sortByResult.FirstValue);
+            var combinedSort = string.Join(",", sortByResult.Values);
+            if (!string.IsNullOrWhiteSpace(combinedSort))
+            {
+                SetFast(metadata, dto, nameof(IQryxRequest<object>.SortBy), combinedSort);
+            }
         }
 
         var isDescResult = valueProvider.GetValue("isDescending");

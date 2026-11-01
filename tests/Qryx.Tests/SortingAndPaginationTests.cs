@@ -304,4 +304,64 @@ public class SortingAndPaginationTests
         Assert.Equal(3, result.Items[1].Id);
         Assert.False(result.HasNext);
     }
+
+    public class MultiSortEntity
+    {
+        public int Id { get; set; }
+
+        [Sortable]
+        public string Department { get; set; } = string.Empty;
+
+        [Sortable]
+        public decimal Salary { get; set; }
+
+        [Sortable]
+        public string Name { get; set; } = string.Empty;
+
+        public string SecretData { get; set; } = string.Empty;
+    }
+
+    [Fact]
+    public void MultiSort_ShouldApply_OrderBy_ThenBy_Correctly()
+    {
+        var data = new List<MultiSortEntity>
+        {
+            new() { Id = 1, Department = "IT", Salary = 5000, Name = "Zack" },
+            new() { Id = 2, Department = "IT", Salary = 5000, Name = "Alice" },
+            new() { Id = 3, Department = "HR", Salary = 6000, Name = "Bob" },
+            new() { Id = 4, Department = "IT", Salary = 7000, Name = "Charlie" },
+        }.AsQueryable();
+
+        // Multi-sort: Department asc, Salary desc, Name asc
+        var sorted = SortBuilder.Apply(data, "Department asc, Salary desc, Name asc");
+        var list = sorted.ToList();
+
+        // 1. HR first: Bob (Salary 6000)
+        Assert.Equal("Bob", list[0].Name);
+
+        // 2. IT with highest salary first: Charlie (Salary 7000)
+        Assert.Equal("Charlie", list[1].Name);
+
+        // 3. IT with Salary 5000: Alice before Zack (Name asc)
+        Assert.Equal("Alice", list[2].Name);
+        Assert.Equal("Zack", list[3].Name);
+    }
+
+    [Fact]
+    public void MultiSort_WithUnwhitelistedField_ShouldSafelySkipInvalidAndApplyValid()
+    {
+        var data = new List<MultiSortEntity>
+        {
+            new() { Id = 1, Department = "IT", Salary = 5000, Name = "Zack", SecretData = "1" },
+            new() { Id = 2, Department = "HR", Salary = 5000, Name = "Alice", SecretData = "2" },
+        }.AsQueryable();
+
+        // SecretData is not [Sortable], Department is [Sortable]
+        var sorted = SortBuilder.Apply(data, "SecretData desc, Department asc", throwOnInvalidProperty: false);
+        var list = sorted.ToList();
+
+        // SecretData is ignored, sorted by Department asc -> HR (Alice), then IT (Zack)
+        Assert.Equal("Alice", list[0].Name);
+        Assert.Equal("Zack", list[1].Name);
+    }
 }
