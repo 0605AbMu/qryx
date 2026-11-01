@@ -37,6 +37,7 @@ samples/
 7. **Keyset / Cursor Pagination**: Katta hajmdagi ma'lumotlar uchun `AfterCursor` orqali tezkor sahifalash.
 8. **Ixcham va qulay JSON envelope**: API javobi faqat `items`, `total` va `hasNext` maydonlarini qaytaradi.
 9. **Classic Swashbuckle & Modern OpenAPI**: Classic Swagger UI (`Swashbuckle.AspNetCore`) va .NET 10 ning yangi OpenAPI kutubxonalari bilan to'liq integratsiya.
+10. **Database-Aware Invariant String Matching**: `StartsWith`, `EndsWith`, `Contains` biznes operatorlari uchun `Invariant = true` (standart) bo'lganda, PostgreSQL provayderida avtomatik ravishda native `ILIKE` ga kompilyatsiya qilinadi. Baza ustuniga `lower()` yoki `upper()` funksiyalari o'ralmasligi sababli PostgreSQL B-Tree indekslaridan to'liq foydalaniladi. Boshqa ma'lumotlar bazalarida esa xavfsiz `lower()` fallback ishlatiladi.
 
 ---
 
@@ -64,8 +65,10 @@ public record UserQueryDto : QryxRequest<User>
     public UserStatus[]? Status { get; init; }
 
     // 3. Hisoblangan maydon (FullName): Qaysi Entity ustunlariga tushishi ko'rsatiladi
-    // Bu yerda DB indeksi buzilmasligi uchun ikkala ustunga OR bilan ulanadi
-    [Filter(Op.StartsWith, TargetProperties = [nameof(User.FirstName), nameof(User.LastName)])]
+    // Bu yerda DB indeksi buzilmasligi uchun ikkala ustunga OR bilan ulanadi.
+    // Invariant = true (default): PostgreSQL'da to'g'ridan-to'g'ri ILIKE ga aylanadi (lower() chaqirmaydi),
+    // boshqa ma'lumotlar bazalarida esa xavfsiz lower() fallback ishlatiladi.
+    [Filter(Op.StartsWith, TargetProperties = [nameof(User.FirstName), nameof(User.LastName)], Invariant = true)]
     public string? FullName { get; init; }
 
     // 4. Navigation property (?departmentName=Sales)
