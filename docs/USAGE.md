@@ -460,6 +460,28 @@ Ishlab chiqarish (production) muhitida eng ko'p uchraydigan xatolar va ularning 
 * Qryx bo'sh satrlar (`""`) yoki `null` qiymatlarni filtr sifatida qabul qilmaydi va ularni avtomatik ravishda chetlab o'tadi (ignore qiladi).
 * Shu sababli, DTO laringizdagi barcha xossalar **nullable** bo'lishi kerak (`int?`, `string?`, `DateTime?`). Agar `int Age` (non-nullable) qilsangiz, DTO standart `0` qiymatini oladi va Qryx bazadan `Age == 0` bo'lganlarni qidirib ketadi!
 
+### ⚠️ Kritik Nuqta 6: Maxfiy Ustunlar Bo'yicha Saralashni Cheklash (`[NotSortable]`)
+* **Xavf**: Agar Entity'da `PasswordHash`, `Salary`, `TwoFactorSecret` kabi maxfiy ustunlar bo'lsa, tajovuzkor `?sortBy=PasswordHash` yoki `?sortBy=Salary` deb so'rov yuborishi va qaytgan ma'lumotlar tartibiga qarab (Side-Channel Inference) maxfiy ma'lumotlarni taxmin qilishi mumkin.
+* **Yechim**: Maxfiy ustunlarni `[NotSortable]` atributi bilan belgilang:
+  ```csharp
+  public class User
+  {
+      public int Id { get; set; }
+      public string Name { get; set; }
+
+      [NotSortable]
+      public string PasswordHash { get; set; }
+
+      [NotSortable]
+      public decimal Salary { get; set; }
+  }
+  ```
+  Qryx bu ustunlar bo'yicha kelgan har qanday `sortBy` so'rovlarini e'tiborsiz qoldiradi va xavfsizlikni ta'minlaydi.
+
+### ⚠️ Kritik Nuqta 7: Katta To'plamlar DoS Himoyasi (`Op.In` / `Op.NotIn`)
+* SQL Server maksimal 2,100 ta parametr, SQLite esa 999 ta parametr qabul qiladi.
+* Agar klient `?status=1&status=2...` deb 5,000 ta qiymat yuborsa, Qryx avtomatik ravishda dastlabki `QryxConstants.DefaultMaxInCollectionSize` (1,000) ta element bilan cheklaydi, bazani va serverni qulashdan himoya qiladi.
+
 ---
 
 ## 10. Ma'lumotlar Bazasi Indekslash Retseptlari (DB Recipes)

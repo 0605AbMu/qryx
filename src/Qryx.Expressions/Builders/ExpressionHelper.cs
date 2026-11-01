@@ -319,8 +319,12 @@ public static class ExpressionHelper
         var listType = typeof(List<>).MakeGenericType(memberType);
         var list = (IList)Activator.CreateInstance(listType)!;
 
+        int count = 0;
         foreach (var item in enumerable)
         {
+            if (++count > Qryx.Core.Constants.QryxConstants.DefaultMaxInCollectionSize)
+                break;
+
             if (item == null)
             {
                 if (underlyingMemberType != null || !memberType.IsValueType)

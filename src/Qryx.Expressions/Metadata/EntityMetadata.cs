@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using Qryx.Core.Attributes;
 
 namespace Qryx.Expressions.Metadata;
 
@@ -21,7 +22,7 @@ public sealed class EntityMetadata
         var dict = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var prop in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (prop.CanRead)
+            if (prop.CanRead && !prop.IsDefined(typeof(NotSortableAttribute), inherit: true))
             {
                 dict[prop.Name] = prop;
             }
@@ -56,7 +57,7 @@ public sealed class EntityMetadata
             foreach (var part in parts)
             {
                 var prop = currentType.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (prop == null || !prop.CanRead)
+                if (prop == null || !prop.CanRead || prop.IsDefined(typeof(NotSortableAttribute), inherit: true))
                     return null;
 
                 lastProp = prop;
