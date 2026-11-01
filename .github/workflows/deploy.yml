@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write # Required for NuGet.org Trusted Publishing (OIDC)
 
 jobs:
   build-and-deploy:
@@ -146,18 +147,28 @@ jobs:
 
           echo "Deployment to GitHub Packages completed successfully!"
 
+      - name: NuGet.org Trusted Publisher Login (OIDC)
+        id: nuget-login
+        if: steps.pack.outputs.PACK_COUNT > 0
+        uses: NuGet/login@v1
+        continue-on-error: true
+        with:
+          user: ${{ vars.NUGET_USER || secrets.NUGET_USER || github.repository_owner }}
+
       - name: Deploy to NuGet.org
         if: steps.pack.outputs.PACK_COUNT > 0
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          OIDC_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          SECRET_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::warning::'NUGET_API_KEY' secret topilmadi! NuGet.org ga nashr qilish uchun GitHub omboringiz sozlamalarida (Settings -> Secrets and variables -> Actions) 'NUGET_API_KEY' sirini qo'shing."
+          API_KEY="${OIDC_KEY:-$SECRET_KEY}"
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::NuGet.org autentifikatsiyasi topilmadi! NuGet.org 'Trusted Publisher' (OIDC) sozlang yoki 'NUGET_API_KEY' sirini qo'shing."
           else
-            echo "Pushing packages to public NuGet.org registry..."
+            echo "Pushing packages to public NuGet.org registry using Trusted Publisher / API Key..."
             dotnet nuget push "./artifacts/*.nupkg" \
               --source "https://api.nuget.org/v3/index.json" \
-              --api-key "$NUGET_API_KEY" \
+              --api-key "$API_KEY" \
               --skip-duplicate
             echo "Deployment to NuGet.org completed successfully!"
           fi
