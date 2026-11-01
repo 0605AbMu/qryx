@@ -35,14 +35,15 @@ public static class SortBuilder
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
 
-        return Apply(source, request.SortBy, request.IsDescending, throwOnInvalidProperty);
+        return Apply(source, request.SortBy, request.IsDescending, throwOnInvalidProperty, request.GetType());
     }
 
     public static IQueryable<TEntity> Apply<TEntity>(
         IQueryable<TEntity> source,
         string? sortBy,
         bool isDescending = false,
-        bool throwOnInvalidProperty = false)
+        bool throwOnInvalidProperty = false,
+        Type? dtoType = null)
     {
         ArgumentNullException.ThrowIfNull(source);
 
@@ -64,12 +65,12 @@ public static class SortBuilder
 
         foreach (var clause in sortClauses)
         {
-            if (!entityMetadata.HasProperty(clause.PropertyName))
+            if (!IsPropertySortable<TEntity>(clause.PropertyName, dtoType, entityMetadata))
             {
                 if (throwOnInvalidProperty)
                 {
                     throw new ArgumentException(
-                        $"Sort property '{clause.PropertyName}' does not exist on entity '{typeof(TEntity).Name}' or is not allowed.",
+                        $"Sort property '{clause.PropertyName}' is not allowed or does not exist on entity '{typeof(TEntity).Name}'.",
                         nameof(sortBy));
                 }
 
@@ -86,6 +87,31 @@ public static class SortBuilder
         }
 
         return orderedQuery ?? source;
+    }
+
+    public static bool IsPropertySortable<TEntity>(string propertyName, Type? dtoType, EntityMetadata entityMetadata)
+    {
+        if (!entityMetadata.HasProperty(propertyName))
+            return false;
+
+        // 1. Check DTO Opt-in whitelist
+        if (dtoType != null)
+        {
+            var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
+            if (dtoMetadata.SortableProperties.Count > 0)
+            {
+                return dtoMetadata.SortableProperties.Contains(propertyName);
+            }
+        }
+
+        // 2. Check Entity Opt-in whitelist
+        if (entityMetadata.SortableProperties.Count > 0)
+        {
+            return entityMetadata.SortableProperties.Contains(propertyName);
+        }
+
+        // 3. Fallback: If no [Sortable] was defined anywhere on DTO or Entity, allow property
+        return true;
     }
 
     private static Func<IQueryable, IQueryable> CreateSortStep(Type entityType, string propertyName, bool isDescending, bool isFirst)

@@ -94,10 +94,47 @@ public static class MetadataCache
             }
         }
 
+        var sortableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attr in dtoType.GetCustomAttributes<SortableAttribute>(inherit: true))
+        {
+            foreach (var p in attr.AllowedProperties)
+                sortableSet.Add(p);
+        }
+
+        foreach (var prop in properties)
+        {
+            if (prop.IsDefined(typeof(SortableAttribute), inherit: true))
+            {
+                var sortAttr = prop.GetCustomAttribute<SortableAttribute>(inherit: true);
+                if (sortAttr?.AllowedProperties != null && sortAttr.AllowedProperties.Length > 0)
+                {
+                    foreach (var ap in sortAttr.AllowedProperties)
+                        sortableSet.Add(ap);
+                }
+
+                var filterAttr = prop.GetCustomAttribute<FilterAttribute>(inherit: true);
+                if (!string.IsNullOrWhiteSpace(filterAttr?.TargetProperty))
+                {
+                    sortableSet.Add(filterAttr.TargetProperty);
+                }
+                else if (filterAttr?.TargetProperties != null && filterAttr.TargetProperties.Length > 0)
+                {
+                    foreach (var tp in filterAttr.TargetProperties)
+                        sortableSet.Add(tp);
+                }
+                else
+                {
+                    sortableSet.Add(ResolvePrefixProperty(prop.Name));
+                    sortableSet.Add(prop.Name);
+                }
+            }
+        }
+
         return new DtoMetadata
         {
             DtoType = dtoType,
             Filters = filterProps,
+            SortableProperties = sortableSet,
             StandardSetters = standardSetters
         };
     }

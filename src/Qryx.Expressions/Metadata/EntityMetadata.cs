@@ -14,20 +14,36 @@ public sealed class EntityMetadata
     public Type EntityType { get; }
     public IReadOnlyDictionary<string, PropertyInfo> Properties { get; }
     public PropertyInfo? PrimaryKeyProperty { get; }
+    public IReadOnlySet<string> SortableProperties { get; }
 
     public EntityMetadata(Type entityType)
     {
         EntityType = entityType;
 
         var dict = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
+        var sortableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. [Sortable] on entity class
+        foreach (var attr in entityType.GetCustomAttributes<SortableAttribute>(inherit: true))
+        {
+            foreach (var p in attr.AllowedProperties)
+                sortableSet.Add(p);
+        }
+
         foreach (var prop in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (prop.CanRead && !prop.IsDefined(typeof(NotSortableAttribute), inherit: true))
             {
                 dict[prop.Name] = prop;
+
+                if (prop.IsDefined(typeof(SortableAttribute), inherit: true))
+                {
+                    sortableSet.Add(prop.Name);
+                }
             }
         }
         Properties = dict;
+        SortableProperties = sortableSet;
 
         // Try find standard Id or EntityId
         if (dict.TryGetValue("Id", out var idProp))

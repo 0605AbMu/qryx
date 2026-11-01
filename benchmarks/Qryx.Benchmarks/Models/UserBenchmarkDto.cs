@@ -6,15 +6,19 @@ namespace Qryx.Benchmarks.Models;
 
 public record UserBenchmarkDto : QryxRequest<BenchmarkUser>
 {
+    [Sortable]
     [Filter(nameof(BenchmarkUser.Age), Op.GreaterThanOrEqual)]
     public int? MinAge { get; init; }
 
+    [Sortable]
     [Filter(nameof(BenchmarkUser.Age), Op.LessThanOrEqual)]
     public int? MaxAge { get; init; }
 
+    [Sortable]
     [Filter(Op.Equals)]
     public string? Status { get; init; }
 
+    [Sortable]
     [Filter(Op.StartsWith, TargetProperties = [nameof(BenchmarkUser.FirstName), nameof(BenchmarkUser.LastName)])]
     public string? FullName { get; init; }
 }
