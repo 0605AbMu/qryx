@@ -4,6 +4,9 @@
     <ProjectReference Include="..\..\src\Qryx.Core\Qryx.Core.csproj" />
     <ProjectReference Include="..\..\src\Qryx.Expressions\Qryx.Expressions.csproj" />
     <ProjectReference Include="..\..\src\Qryx.EntityFramework\Qryx.EntityFramework.csproj" />
+    <ProjectReference Include="..\..\src\Qryx.SourceGenerator\Qryx.SourceGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +27,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
   </PropertyGroup>
 
 </Project>

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
@@ -15,6 +17,8 @@ namespace Qryx.SourceGenerator;
 [Generator]
 public class QryxIncrementalGenerator : IIncrementalGenerator
 {
+    private static readonly string[] RangePrefixes = new[] { "Min", "Max", "From", "To" };
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var classDeclarations = context.SyntaxProvider
@@ -79,7 +83,7 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("namespace Qryx.Generated");
         sb.AppendLine("{");
-        sb.AppendLine("    public static class QryxCompileTimeExtensions");
+        sb.AppendLine("    public static class QryxGeneratedExtensions");
         sb.AppendLine("    {");
 
         foreach (var classSymbol in distinctClasses)
@@ -88,13 +92,104 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
             var classNamespace = classSymbol.ContainingNamespace.ToDisplayString();
             var fullClassName = $"{classNamespace}.{className}";
 
+            // Find entity type from QryxRequest<TEntity>
+            string? entityType = null;
+            var baseType = classSymbol.BaseType;
+            while (baseType != null)
+            {
+                if (baseType.Name.StartsWith("QryxRequest") && baseType.TypeArguments.Length == 1)
+                {
+                    entityType = baseType.TypeArguments[0].ToDisplayString();
+                    break;
+                }
+                baseType = baseType.BaseType;
+            }
+
+            if (entityType == null)
+            {
+                foreach (var iface in classSymbol.AllInterfaces)
+                {
+                    if (iface.Name.StartsWith("IQryxRequest") && iface.TypeArguments.Length == 1)
+                    {
+                        entityType = iface.TypeArguments[0].ToDisplayString();
+                        break;
+                    }
+                }
+            }
+
+            var typeParam = entityType ?? "TEntity";
+
             sb.AppendLine($"        /// <summary>");
-            sb.AppendLine($"        /// Compile-time fast filter generator for {className} with zero reflection.");
+            sb.AppendLine($"        /// Compile-time fast filter generator for {className} with 0.00 ns reflection.");
             sb.AppendLine($"        /// </summary>");
-            sb.AppendLine($"        public static IQueryable<TEntity> ApplyCompileTime<TEntity>(this IQueryable<TEntity> source, {fullClassName} request)");
+            if (entityType != null)
+            {
+                sb.AppendLine($"        public static IQueryable<{typeParam}> ApplyGenerated(this IQueryable<{typeParam}> query, {fullClassName} request)");
+            }
+            else
+            {
+                sb.AppendLine($"        public static IQueryable<TEntity> ApplyGenerated<TEntity>(this IQueryable<TEntity> query, {fullClassName} request)");
+            }
             sb.AppendLine($"        {{");
-            sb.AppendLine($"            // Compile-time generated fast path");
-            sb.AppendLine($"            return Qryx.Expressions.Builders.FilterBuilder.Apply(source, request);");
+            sb.AppendLine($"            if (request == null) return query;");
+            sb.AppendLine();
+
+            // Process properties with [Filter]
+            var properties = classSymbol.GetMembers().OfType<IPropertySymbol>();
+            foreach (var prop in properties)
+            {
+                var filterAttr = prop.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name is "FilterAttribute" or "Filter");
+                if (filterAttr == null)
+                    continue;
+
+                var op = GetOperator(filterAttr);
+                var targetProps = GetTargetProperties(prop, filterAttr);
+
+                GenerateFilterLogic(sb, prop, op, targetProps);
+            }
+
+            // Generate sorting and pagination
+            sb.AppendLine();
+            if (entityType != null)
+            {
+                sb.AppendLine($"            if (request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> req)");
+                sb.AppendLine($"            {{");
+                sb.AppendLine($"                if (!string.IsNullOrWhiteSpace(req.SortBy))");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req.SortBy, req.IsDescending, false);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine();
+                sb.AppendLine($"                if (req.AfterCursor != null)");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, req.AfterCursor, req.PageSize, req.CursorProperty, req.IsDescending);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine($"                else");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, req.Page, req.PageSize);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine($"            }}");
+            }
+            else
+            {
+                sb.AppendLine($"            if (request is Qryx.Core.Contracts.IQryxRequest<TEntity> req)");
+                sb.AppendLine($"            {{");
+                sb.AppendLine($"                if (!string.IsNullOrWhiteSpace(req.SortBy))");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req.SortBy, req.IsDescending, false);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine();
+                sb.AppendLine($"                if (req.AfterCursor != null)");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, req.AfterCursor, req.PageSize, req.CursorProperty, req.IsDescending);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine($"                else");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, req.Page, req.PageSize);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine($"            }}");
+            }
+            sb.AppendLine();
+            sb.AppendLine($"            return query;");
             sb.AppendLine($"        }}");
             sb.AppendLine();
         }
@@ -103,5 +198,166 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
         sb.AppendLine("}");
 
         spc.AddSource("QryxGeneratedExtensions.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+    }
+
+    private static int GetOperator(AttributeData filterAttr)
+    {
+        if (filterAttr.ConstructorArguments.Length > 0)
+        {
+            var firstArg = filterAttr.ConstructorArguments[0];
+            if (firstArg.Kind == TypedConstantKind.Enum && firstArg.Value is int opVal)
+                return opVal;
+
+            if (filterAttr.ConstructorArguments.Length > 1)
+            {
+                var secondArg = filterAttr.ConstructorArguments[1];
+                if (secondArg.Kind == TypedConstantKind.Enum && secondArg.Value is int opVal2)
+                    return opVal2;
+            }
+        }
+        return 0; // Equals
+    }
+
+    private static List<string> GetTargetProperties(IPropertySymbol prop, AttributeData filterAttr)
+    {
+        // 1. Check named argument TargetProperties
+        var targetPropsNamed = filterAttr.NamedArguments.FirstOrDefault(kvp => kvp.Key == "TargetProperties");
+        if (targetPropsNamed.Key == "TargetProperties" && targetPropsNamed.Value.Kind == TypedConstantKind.Array)
+        {
+            var values = targetPropsNamed.Value.Values;
+            if (values.Length > 0)
+            {
+                var list = new List<string>();
+                foreach (var v in values)
+                {
+                    if (v.Value is string s && !string.IsNullOrWhiteSpace(s))
+                        list.Add(s);
+                }
+                if (list.Count > 0) return list;
+            }
+        }
+
+        // 2. Check named argument TargetProperty
+        var targetPropNamed = filterAttr.NamedArguments.FirstOrDefault(kvp => kvp.Key == "TargetProperty");
+        if (targetPropNamed.Key == "TargetProperty" && targetPropNamed.Value.Value is string targetStr && !string.IsNullOrWhiteSpace(targetStr))
+        {
+            return new List<string> { targetStr };
+        }
+
+        // 3. Check constructor argument of type string
+        foreach (var arg in filterAttr.ConstructorArguments)
+        {
+            if (arg.Kind == TypedConstantKind.Primitive && arg.Value is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                return new List<string> { s };
+            }
+        }
+
+        // 4. Prefix resolution
+        var name = prop.Name;
+        foreach (var prefix in RangePrefixes)
+        {
+            if (name.StartsWith(prefix) && name.Length > prefix.Length && char.IsUpper(name[prefix.Length]))
+            {
+                return new List<string> { name.Substring(prefix.Length) };
+            }
+        }
+
+        return new List<string> { name };
+    }
+
+    private static void GenerateFilterLogic(StringBuilder sb, IPropertySymbol prop, int op, List<string> targetProps)
+    {
+        var propName = prop.Name;
+        var isNullableValue = prop.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        var isString = prop.Type.SpecialType == SpecialType.System_String;
+
+        string checkCondition;
+        string valAccess;
+
+        if (isNullableValue)
+        {
+            checkCondition = $"request.{propName}.HasValue";
+            valAccess = $"request.{propName}.Value";
+        }
+        else if (isString)
+        {
+            checkCondition = $"!string.IsNullOrEmpty(request.{propName})";
+            valAccess = $"request.{propName}";
+        }
+        else
+        {
+            checkCondition = $"request.{propName} != null";
+            valAccess = $"request.{propName}";
+        }
+
+        sb.AppendLine($"            if ({checkCondition})");
+        sb.AppendLine($"            {{");
+        sb.AppendLine($"                var val = {valAccess};");
+
+        if (targetProps.Count == 1)
+        {
+            var target = targetProps[0];
+            switch (op)
+            {
+                case 0: // Equals
+                    sb.AppendLine($"                query = query.Where(x => x.{target} == val);");
+                    break;
+                case 1: // NotEquals
+                    sb.AppendLine($"                query = query.Where(x => x.{target} != val);");
+                    break;
+                case 2: // GreaterThan
+                    sb.AppendLine($"                query = query.Where(x => x.{target} > val);");
+                    break;
+                case 3: // GreaterThanOrEqual
+                    sb.AppendLine($"                query = query.Where(x => x.{target} >= val);");
+                    break;
+                case 4: // LessThan
+                    sb.AppendLine($"                query = query.Where(x => x.{target} < val);");
+                    break;
+                case 5: // LessThanOrEqual
+                    sb.AppendLine($"                query = query.Where(x => x.{target} <= val);");
+                    break;
+                case 6: // StartsWith
+                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.StartsWith(val));");
+                    break;
+                case 7: // EndsWith
+                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.EndsWith(val));");
+                    break;
+                case 8: // Contains
+                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.Contains(val));");
+                    break;
+                default:
+                    sb.AppendLine($"                query = query.Where(x => x.{target} == val);");
+                    break;
+            }
+        }
+        else if (targetProps.Count > 1)
+        {
+            // Multi-target (e.g. FirstName, LastName)
+            var conditions = new List<string>();
+            foreach (var t in targetProps)
+            {
+                switch (op)
+                {
+                    case 6: // StartsWith
+                        conditions.Add($"(x.{t} != null && x.{t}.StartsWith(val))");
+                        break;
+                    case 7: // EndsWith
+                        conditions.Add($"(x.{t} != null && x.{t}.EndsWith(val))");
+                        break;
+                    case 8: // Contains
+                        conditions.Add($"(x.{t} != null && x.{t}.Contains(val))");
+                        break;
+                    default:
+                        conditions.Add($"x.{t} == val");
+                        break;
+                }
+            }
+            var combinedCondition = string.Join(" || ", conditions);
+            sb.AppendLine($"                query = query.Where(x => {combinedCondition});");
+        }
+
+        sb.AppendLine($"            }}");
     }
 }

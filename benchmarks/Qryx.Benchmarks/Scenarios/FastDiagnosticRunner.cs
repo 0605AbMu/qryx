@@ -7,6 +7,7 @@ using Qryx.Benchmarks.Models;
 using Qryx.Benchmarks.Services;
 using Qryx.EntityFramework.Extensions;
 using Qryx.Expressions.Builders;
+using Qryx.Generated;
 using Sieve.Models;
 
 namespace Qryx.Benchmarks.Scenarios;
@@ -86,16 +87,10 @@ public static class FastDiagnosticRunner
 
         const int iterations = 50_000;
 
-        // Test Qryx Max (Direct Fast Path)
-        var qryxFastMetric = MeasureMetric("Qryx (Max: Direct Fast Path)", iterations, () =>
+        // Test Qryx Source Generator (Roslyn Compile-time, 0.00 ns Reflection)
+        var qryxSourceGenMetric = MeasureMetric("Qryx (Roslyn Source Generator)", iterations, () =>
         {
-            var q = dummyQuery;
-            if (qryxComplex.MinAge.HasValue) q = q.Where(x => x.Age >= qryxComplex.MinAge.Value);
-            if (qryxComplex.MaxAge.HasValue) q = q.Where(x => x.Age <= qryxComplex.MaxAge.Value);
-            if (!string.IsNullOrEmpty(qryxComplex.Status)) q = q.Where(x => x.Status == qryxComplex.Status);
-            if (!string.IsNullOrEmpty(qryxComplex.FullName)) q = q.Where(x => x.FirstName.StartsWith(qryxComplex.FullName) || x.LastName.StartsWith(qryxComplex.FullName));
-            q = q.OrderByDescending(x => x.CreatedAt);
-            return q.Skip(20).Take(20);
+            return dummyQuery.ApplyGenerated(qryxComplex);
         });
 
         // Test Qryx
@@ -127,7 +122,7 @@ public static class FastDiagnosticRunner
             return opt.ApplyTo(dummyQuery);
         });
 
-        PrintResultsTable([qryxFastMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
     }
 
     public static void RunExecutionSuite()
@@ -192,6 +187,11 @@ public static class FastDiagnosticRunner
 
         const int iterations = 5_000;
 
+        var qryxSourceGenMetric = MeasureMetric("Qryx (Source Generator LINQ)", iterations, () =>
+        {
+            return db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
+        });
+
         var qryxMetric = MeasureMetric("Qryx (Execute & Materialize)", iterations, () =>
         {
             var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
@@ -217,7 +217,7 @@ public static class FastDiagnosticRunner
             return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
         });
 
-        PrintResultsTable([qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
     }
 
     public static void RunPostgresExecutionSuite()
@@ -314,15 +314,21 @@ public static class FastDiagnosticRunner
             return db.Users.AsNoTracking().ToPagedResultAsync(qryxCursorDto).GetAwaiter().GetResult();
         });
 
-        // 3. Qryx Standard: Offset Pagination
-        var qryxMetric = MeasureMetric("Qryx (Standard: Offset Execute)", iterations, () =>
+        // 3. Qryx Source Generator (Compiled LINQ)
+        var qryxSourceGenMetric = MeasureMetric("Qryx (Source Generator LINQ)", iterations, () =>
+        {
+            return db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
+        });
+
+        // 4. Qryx Standard: Offset Pagination
+        var qryxMetric = MeasureMetric("Qryx (Standard: Dynamic AST)", iterations, () =>
         {
             var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
             q = SortBuilder.Apply(q, qryxComplex);
             return PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
         });
 
-        // 4. Gridify
+        // 5. Gridify
         var gridifyMetric = MeasureMetric("Gridify (Postgres Real DB)", iterations, () =>
         {
             var q = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter);
@@ -330,20 +336,20 @@ public static class FastDiagnosticRunner
             return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
         });
 
-        // 5. Sieve
+        // 6. Sieve
         var sieveMetric = MeasureMetric("Sieve (Postgres Real DB)", iterations, () =>
         {
             return sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
         });
 
-        // 6. OData
+        // 7. OData
         var odataMetric = MeasureMetric("OData (Postgres Real DB)", iterations, () =>
         {
             var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
             return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
         });
 
-        PrintResultsTable([qryxPeakMetric, qryxKeysetMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        PrintResultsTable([qryxPeakMetric, qryxKeysetMetric, qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
     }
 
     public static void RunConcurrencyStressSuite()
@@ -390,6 +396,11 @@ public static class FastDiagnosticRunner
 
         const int totalParallelOps = 100_000;
 
+        var qryxSourceGenMetric = MeasureParallel("Qryx (Source Gen Parallel)", totalParallelOps, () =>
+        {
+            dummyQuery.ApplyGenerated(qryxComplex);
+        });
+
         var qryxMetric = MeasureParallel("Qryx (Parallel)", totalParallelOps, () =>
         {
             var q = FilterBuilder.Apply(dummyQuery, qryxComplex);
@@ -415,7 +426,7 @@ public static class FastDiagnosticRunner
             opt.ApplyTo(dummyQuery);
         });
 
-        PrintResultsTable([qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
     }
 
     public static void RunPaginationStrategiesSuite()

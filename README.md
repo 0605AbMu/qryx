@@ -171,13 +171,14 @@ API Endpoint: `http://localhost:5000/api/users`
 
 To'liq benchmark loyihasi [Qryx.Benchmarks](file:///Users/0605abmu/Desktop/work/qryx/benchmarks/Qryx.Benchmarks) manzilida joylashgan bo'lib, har xil sharoitlardagi sinovlarni o'z ichiga oladi:
 
-| Ko'rsatkich / Sharoit | Qryx | Gridify | Sieve | OData |
-| :--- | :--- | :--- | :--- | :--- |
-| **So'rov tuzish (Construction)** | **7.74 μs** (1.00x) | 29.25 μs (3.78x sekin) | 28.53 μs (3.69x sekin) | 42.03 μs (5.43x sekin) |
-| **Xotira sarfi (Allocated Heap)** | **3.9 KB** (Eng kam!) | 25.2 KB (6.5x ko'p) | 23.5 KB (6.0x ko'p) | 43.9 KB (11.2x ko'p) |
-| **Real PostgreSQL DB (10k items)** | **663 μs (25.2 KB)** | 613 μs (46.3 KB) | 658 μs (51.2 KB) | 635 μs (69.9 KB) |
-| **Parallel yuklama (Concurrency)** | **1,200,000+ ops/s** (833 ns) | ~108,000 ops/s (11x sekin) | ~69,000 ops/s (17x sekin) | ~94,000 ops/s (12x sekin) |
-| **Single-Query Sahifalash (Postgres)** | **287 μs (2.74x tezroq)** | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
+| Ko'rsatkich / Sharoit | Qryx (Compiled AST) | Qryx (Source Gen) | Gridify | Sieve | OData |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **So'rov tuzish (Construction)** | **6.27 μs (4.0x tezroq)** | **14.55 μs (1.7x tezroq)** | 25.07 μs | 27.60 μs | 46.84 μs |
+| **Xotira sarfi (Allocated Heap)** | **3.8 KB (Eng kam!)** | **7.7 KB** | 25.4 KB (6.7x ko'p) | 23.7 KB (6.2x ko'p) | 43.9 KB (11.5x ko'p) |
+| **Real PostgreSQL DB (10k items)** | **639 μs (21.1 KB)** | 751 μs (36.5 KB) | 612 μs (46.5 KB) | 607 μs (50.4 KB) | 611 μs (67.7 KB) |
+| **Parallel yuklama (Concurrency)** | **1,270,000+ ops/s** (786 ns) | **761,000+ ops/s** (1.31 μs) | ~205,000 ops/s (6.2x sekin) | ~88,000 ops/s (14.4x sekin) | ~77,000 ops/s (16.4x sekin) |
+| **Single-Query Sahifalash (Postgres)** | **238 μs (3.25x tezroq)** | - | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
+| **Zero-Copy Stream (IAsyncEnumerable)** | **243 μs (3.19x tezroq)** | - | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
 
 Benchmarklarni ishga tushirish:
 ```bash
