@@ -21,6 +21,15 @@ public static class ExpressionHelper
     private static readonly MethodInfo StringContainsMethod =
         typeof(string).GetMethod(nameof(string.Contains), [typeof(string)])!;
 
+    private static readonly MethodInfo StringConcatMethod =
+        typeof(string).GetMethod(nameof(string.Concat), [typeof(string), typeof(string)])!;
+
+    private static readonly MethodInfo StringConcat3Method =
+        typeof(string).GetMethod(nameof(string.Concat), [typeof(string), typeof(string), typeof(string)])!;
+
+    private static readonly Lazy<MethodInfo?> EfILikeMethod = new(FindEfILikeMethod);
+    private static readonly Lazy<Expression?> EfFunctionsExpr = new(FindEfFunctionsInstance);
+
     public static Expression BuildMemberAccess(Expression parameter, string propertyPath)
     {
         Expression current = parameter;
@@ -98,42 +107,155 @@ public static class ExpressionHelper
         return rawConstant;
     }
 
-    public static Expression BuildStringComparison(
+    public static bool IsPostgreSqlProvider(IQueryProvider? provider)
+    {
+        if (provider == null) return false;
+
+        try
+        {
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var compiler = provider.GetType().GetField("_queryCompiler", flags)?.GetValue(provider);
+            if (compiler != null)
+            {
+                var generator = compiler.GetType().GetField("_compiledQueryCacheKeyGenerator", flags)?.GetValue(compiler);
+                if (generator != null && generator.GetType().FullName?.Contains("Npgsql") == true)
+                {
+                    return true;
+                }
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    public static Expression BuildStartsWith(
         Expression member,
         Expression constant,
-        MethodInfo method,
-        bool caseSensitive)
+        bool isInvariant,
+        bool isPostgreSql)
     {
         var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
 
-        Expression targetMember = member;
-        Expression targetConst = constant;
-
-        if (!caseSensitive)
+        if (!isInvariant)
         {
-            targetMember = Expression.Call(member, StringToLowerMethod);
-            if (constant is ConstantExpression { Value: string constStr })
+            var call = Expression.Call(member, StringStartsWithMethod, constant);
+            return Expression.AndAlso(nullGuard, call);
+        }
+
+        if (isPostgreSql)
+        {
+            var ilikeMethod = EfILikeMethod.Value;
+            var functionsExpr = EfFunctionsExpr.Value;
+            if (ilikeMethod != null && functionsExpr != null)
             {
-                targetConst = Expression.Constant(constStr.ToLower(), typeof(string));
-            }
-            else
-            {
-                targetConst = Expression.Call(constant, StringToLowerMethod);
+                var patternExpr = BuildPatternConcat(constant, prefix: null, suffix: "%");
+                return Expression.Call(ilikeMethod, functionsExpr, member, patternExpr);
             }
         }
 
-        var call = Expression.Call(targetMember, method, targetConst);
-        return Expression.AndAlso(nullGuard, call);
+        var lowerMember = Expression.Call(member, StringToLowerMethod);
+        var lowerConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToLowerMethod);
+
+        var lowerCall = Expression.Call(lowerMember, StringStartsWithMethod, lowerConst);
+        return Expression.AndAlso(nullGuard, lowerCall);
     }
 
-    public static Expression BuildStartsWith(Expression member, Expression constant, bool caseSensitive) =>
-        BuildStringComparison(member, constant, StringStartsWithMethod, caseSensitive);
+    public static Expression BuildEndsWith(
+        Expression member,
+        Expression constant,
+        bool isInvariant,
+        bool isPostgreSql)
+    {
+        var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
 
-    public static Expression BuildEndsWith(Expression member, Expression constant, bool caseSensitive) =>
-        BuildStringComparison(member, constant, StringEndsWithMethod, caseSensitive);
+        if (!isInvariant)
+        {
+            var call = Expression.Call(member, StringEndsWithMethod, constant);
+            return Expression.AndAlso(nullGuard, call);
+        }
 
-    public static Expression BuildContains(Expression member, Expression constant, bool caseSensitive) =>
-        BuildStringComparison(member, constant, StringContainsMethod, caseSensitive);
+        if (isPostgreSql)
+        {
+            var ilikeMethod = EfILikeMethod.Value;
+            var functionsExpr = EfFunctionsExpr.Value;
+            if (ilikeMethod != null && functionsExpr != null)
+            {
+                var patternExpr = BuildPatternConcat(constant, prefix: "%", suffix: null);
+                return Expression.Call(ilikeMethod, functionsExpr, member, patternExpr);
+            }
+        }
+
+        var lowerMember = Expression.Call(member, StringToLowerMethod);
+        var lowerConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToLowerMethod);
+
+        var lowerCall = Expression.Call(lowerMember, StringEndsWithMethod, lowerConst);
+        return Expression.AndAlso(nullGuard, lowerCall);
+    }
+
+    public static Expression BuildContains(
+        Expression member,
+        Expression constant,
+        bool isInvariant,
+        bool isPostgreSql)
+    {
+        var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
+
+        if (!isInvariant)
+        {
+            var call = Expression.Call(member, StringContainsMethod, constant);
+            return Expression.AndAlso(nullGuard, call);
+        }
+
+        if (isPostgreSql)
+        {
+            var ilikeMethod = EfILikeMethod.Value;
+            var functionsExpr = EfFunctionsExpr.Value;
+            if (ilikeMethod != null && functionsExpr != null)
+            {
+                var patternExpr = BuildPatternConcat(constant, prefix: "%", suffix: "%");
+                return Expression.Call(ilikeMethod, functionsExpr, member, patternExpr);
+            }
+        }
+
+        var lowerMember = Expression.Call(member, StringToLowerMethod);
+        var lowerConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToLowerMethod);
+
+        var lowerCall = Expression.Call(lowerMember, StringContainsMethod, lowerConst);
+        return Expression.AndAlso(nullGuard, lowerCall);
+    }
+
+    private static Expression BuildPatternConcat(Expression valueExpr, string? prefix, string? suffix)
+    {
+        if (valueExpr is ConstantExpression { Value: string strVal })
+        {
+            var combined = $"{prefix ?? string.Empty}{strVal}{suffix ?? string.Empty}";
+            return Expression.Constant(combined, typeof(string));
+        }
+
+        if (prefix != null && suffix != null)
+        {
+            return Expression.Call(StringConcat3Method, Expression.Constant(prefix), valueExpr, Expression.Constant(suffix));
+        }
+
+        if (prefix != null)
+        {
+            return Expression.Call(StringConcatMethod, Expression.Constant(prefix), valueExpr);
+        }
+
+        if (suffix != null)
+        {
+            return Expression.Call(StringConcatMethod, valueExpr, Expression.Constant(suffix));
+        }
+
+        return valueExpr;
+    }
 
     public static Expression BuildInExpression(Expression member, object collection)
     {
@@ -144,7 +266,6 @@ public static class ExpressionHelper
         var elementType = GetCollectionElementType(collection.GetType());
         var enumerable = (IEnumerable)collection;
 
-        // Create a typed list matching memberType for exact compatibility
         var listType = typeof(List<>).MakeGenericType(memberType);
         var list = (IList)Activator.CreateInstance(listType)!;
 
@@ -197,5 +318,26 @@ public static class ExpressionHelper
         }
 
         return typeof(object);
+    }
+
+    private static MethodInfo? FindEfILikeMethod()
+    {
+        try { Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL"); } catch { }
+        return AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a => { try { return a.GetTypes(); } catch { return Type.EmptyTypes; } })
+            .FirstOrDefault(t => t.Name == "NpgsqlDbFunctionsExtensions")
+            ?.GetMethods()
+            .FirstOrDefault(m => m.Name == "ILike" && m.GetParameters().Length == 3);
+    }
+
+    private static Expression? FindEfFunctionsInstance()
+    {
+        try { Assembly.Load("Microsoft.EntityFrameworkCore"); } catch { }
+        var efType = AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a => { try { return a.GetTypes(); } catch { return Type.EmptyTypes; } })
+            .FirstOrDefault(t => t.FullName == "Microsoft.EntityFrameworkCore.EF");
+
+        var prop = efType?.GetProperty("Functions", BindingFlags.Public | BindingFlags.Static);
+        return prop != null ? Expression.Property(null, prop) : null;
     }
 }

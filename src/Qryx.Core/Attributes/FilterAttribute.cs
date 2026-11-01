@@ -23,7 +23,12 @@ public sealed class FilterAttribute : Attribute
     /// </summary>
     public string[]? TargetProperties { get; init; }
 
-    public bool CaseSensitive { get; init; } = false;
+    /// <summary>
+    /// Specifies whether string matching operations (StartsWith, EndsWith, Contains) should be case-insensitive (invariant).
+    /// When true and targeting PostgreSQL, translates directly to native ILIKE (avoiding lower()/upper() functions).
+    /// Defaults to true.
+    /// </summary>
+    public bool Invariant { get; init; } = true;
 
     public FilterAttribute(Op @operator)
     {

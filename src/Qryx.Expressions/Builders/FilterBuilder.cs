@@ -12,13 +12,15 @@ public static class FilterBuilder
 {
     /// <summary>
     /// Applies declarative filter attributes from the DTO instance to the queryable.
+    /// Automatically detects provider (e.g. PostgreSQL) for optimal native translation.
     /// </summary>
     public static IQueryable<TEntity> Apply<TEntity>(IQueryable<TEntity> source, object request)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
 
-        var predicate = BuildPredicate<TEntity>(request);
+        var isPostgreSql = ExpressionHelper.IsPostgreSqlProvider(source.Provider);
+        var predicate = BuildPredicate<TEntity>(request, isPostgreSql);
         return predicate != null ? source.Where(predicate) : source;
     }
 
@@ -26,7 +28,9 @@ public static class FilterBuilder
     /// Builds a combined Expression&lt;Func&lt;TEntity, bool&gt;&gt; predicate from DTO filter metadata.
     /// Returns null if no active filters are provided.
     /// </summary>
-    public static Expression<Func<TEntity, bool>>? BuildPredicate<TEntity>(object request)
+    public static Expression<Func<TEntity, bool>>? BuildPredicate<TEntity>(
+        object request,
+        bool isPostgreSql = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -57,7 +61,7 @@ public static class FilterBuilder
             Expression? filterCombinedExpr = null;
             foreach (var path in filter.TargetPropertyPaths)
             {
-                var pathExpr = BuildSingleValueExpressionForPath(parameter, path, filter, val);
+                var pathExpr = BuildSingleValueExpressionForPath(parameter, path, filter, val, isPostgreSql);
                 if (pathExpr == null)
                     continue;
 
@@ -88,7 +92,8 @@ public static class FilterBuilder
         Expression parameter,
         string targetPath,
         FilterPropertyMetadata filter,
-        object val)
+        object val,
+        bool isPostgreSql)
     {
         var targetMember = ExpressionHelper.BuildMemberAccess(parameter, targetPath);
 
@@ -127,17 +132,17 @@ public static class FilterBuilder
             case Op.StartsWith:
             {
                 var constant = Expression.Constant(val.ToString(), typeof(string));
-                return ExpressionHelper.BuildStartsWith(targetMember, constant, filter.CaseSensitive);
+                return ExpressionHelper.BuildStartsWith(targetMember, constant, filter.Invariant, isPostgreSql);
             }
             case Op.EndsWith:
             {
                 var constant = Expression.Constant(val.ToString(), typeof(string));
-                return ExpressionHelper.BuildEndsWith(targetMember, constant, filter.CaseSensitive);
+                return ExpressionHelper.BuildEndsWith(targetMember, constant, filter.Invariant, isPostgreSql);
             }
             case Op.Contains:
             {
                 var constant = Expression.Constant(val.ToString(), typeof(string));
-                return ExpressionHelper.BuildContains(targetMember, constant, filter.CaseSensitive);
+                return ExpressionHelper.BuildContains(targetMember, constant, filter.Invariant, isPostgreSql);
             }
             case Op.In:
             {
@@ -173,7 +178,7 @@ public static class FilterBuilder
                 return Expression.NotEqual(targetMember, Expression.Constant(null, targetMember.Type));
             }
             default:
-                return null;
+                throw new NotSupportedException($"Operator '{filter.Operator}' is not supported.");
         }
     }
 }

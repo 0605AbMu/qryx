@@ -69,7 +69,7 @@ public static class MetadataCache
                 DtoPropertyType = prop.PropertyType,
                 TargetPropertyPaths = targetPaths,
                 Operator = filterAttr.Operator,
-                CaseSensitive = filterAttr.CaseSensitive,
+                Invariant = filterAttr.Invariant,
                 Getter = getter,
                 IsCollection = isCollection,
                 CollectionElementType = collectionElementType

@@ -19,7 +19,7 @@ public sealed class FilterPropertyMetadata
     public required IReadOnlyList<string> TargetPropertyPaths { get; init; }
 
     public required Op Operator { get; init; }
-    public required bool CaseSensitive { get; init; }
+    public required bool Invariant { get; init; }
 
     /// <summary>Compiled fast getter: (dtoInstance) => propertyValue</summary>
     public required Func<object, object?> Getter { get; init; }
