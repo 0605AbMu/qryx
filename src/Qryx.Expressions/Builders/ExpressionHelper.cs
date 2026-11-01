@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -30,19 +31,34 @@ public static class ExpressionHelper
     private static readonly Lazy<MethodInfo?> EfILikeMethod = new(FindEfILikeMethod);
     private static readonly Lazy<Expression?> EfFunctionsExpr = new(FindEfFunctionsInstance);
 
+    private static readonly ConcurrentDictionary<(Type Type, string Path), PropertyInfo[]> PropertyChainCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<IQueryProvider, bool>> ProviderInspectorCache = new();
+
     public static Expression BuildMemberAccess(Expression parameter, string propertyPath)
     {
-        Expression current = parameter;
-        var parts = propertyPath.Split('.');
-
-        foreach (var part in parts)
+        var chain = PropertyChainCache.GetOrAdd((parameter.Type, propertyPath), static key =>
         {
-            var prop = current.Type.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (prop == null)
+            var (type, path) = key;
+            var parts = path.Split('.');
+            var props = new PropertyInfo[parts.Length];
+            var currentType = type;
+
+            for (int i = 0; i < parts.Length; i++)
             {
-                throw new InvalidOperationException($"Property '{part}' not found on type '{current.Type.FullName}'.");
+                var part = parts[i];
+                var prop = currentType.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                           ?? throw new InvalidOperationException($"Property '{part}' not found on type '{currentType.FullName}'.");
+                props[i] = prop;
+                currentType = prop.PropertyType;
             }
-            current = Expression.Property(current, prop);
+
+            return props;
+        });
+
+        Expression current = parameter;
+        for (int i = 0; i < chain.Length; i++)
+        {
+            current = Expression.Property(current, chain[i]);
         }
 
         return current;
@@ -111,22 +127,40 @@ public static class ExpressionHelper
     {
         if (provider == null) return false;
 
-        try
+        var inspector = ProviderInspectorCache.GetOrAdd(provider.GetType(), static pType =>
         {
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            var compiler = provider.GetType().GetField("_queryCompiler", flags)?.GetValue(provider);
-            if (compiler != null)
+            try
             {
-                var generator = compiler.GetType().GetField("_compiledQueryCacheKeyGenerator", flags)?.GetValue(compiler);
-                if (generator != null && generator.GetType().FullName?.Contains("Npgsql") == true)
-                {
-                    return true;
-                }
-            }
-        }
-        catch { }
+                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                var compilerField = pType.GetField("_queryCompiler", flags);
+                if (compilerField == null) return _ => false;
 
-        return false;
+                var compilerType = compilerField.FieldType;
+                var genField = compilerType.GetField("_compiledQueryCacheKeyGenerator", flags);
+                if (genField == null) return _ => false;
+
+                return p =>
+                {
+                    try
+                    {
+                        var compiler = compilerField.GetValue(p);
+                        if (compiler == null) return false;
+                        var generator = genField.GetValue(compiler);
+                        return generator?.GetType().FullName?.Contains("Npgsql") == true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                };
+            }
+            catch
+            {
+                return _ => false;
+            }
+        });
+
+        return inspector(provider);
     }
 
     public static Expression BuildStartsWith(
@@ -255,6 +289,22 @@ public static class ExpressionHelper
         }
 
         return valueExpr;
+    }
+
+    public static Expression BuildFts(
+        Expression member,
+        Expression constant,
+        bool isPostgreSql)
+    {
+        return BuildContains(member, constant, isInvariant: true, isPostgreSql);
+    }
+
+    public static Expression BuildJsonContains(
+        Expression member,
+        Expression constant,
+        bool isPostgreSql)
+    {
+        return BuildContains(member, constant, isInvariant: false, isPostgreSql);
     }
 
     public static Expression BuildInExpression(Expression member, object collection)

@@ -39,7 +39,7 @@ public static class FilterBuilder
             return null;
 
         var parameter = Expression.Parameter(typeof(TEntity), "x");
-        var expressions = new List<Expression>();
+        Expression? combined = null;
 
         foreach (var filter in dtoMetadata.Filters)
         {
@@ -59,9 +59,10 @@ public static class FilterBuilder
             }
 
             Expression? filterCombinedExpr = null;
-            foreach (var path in filter.TargetPropertyPaths)
+            var paths = filter.TargetPropertyPaths;
+            for (int i = 0; i < paths.Count; i++)
             {
-                var pathExpr = BuildSingleValueExpressionForPath(parameter, path, filter, val, isPostgreSql);
+                var pathExpr = BuildSingleValueExpressionForPath(parameter, paths[i], filter, val, isPostgreSql);
                 if (pathExpr == null)
                     continue;
 
@@ -72,18 +73,14 @@ public static class FilterBuilder
 
             if (filterCombinedExpr != null)
             {
-                expressions.Add(filterCombinedExpr);
+                combined = combined == null
+                    ? filterCombinedExpr
+                    : Expression.AndAlso(combined, filterCombinedExpr);
             }
         }
 
-        if (expressions.Count == 0)
+        if (combined == null)
             return null;
-
-        Expression combined = expressions[0];
-        for (int i = 1; i < expressions.Count; i++)
-        {
-            combined = Expression.AndAlso(combined, expressions[i]);
-        }
 
         return Expression.Lambda<Func<TEntity, bool>>(combined, parameter);
     }
@@ -176,6 +173,16 @@ public static class FilterBuilder
                         : Expression.Equal(targetMember, Expression.Constant(null, targetMember.Type));
                 }
                 return Expression.NotEqual(targetMember, Expression.Constant(null, targetMember.Type));
+            }
+            case Op.Fts:
+            {
+                var constant = Expression.Constant(val.ToString(), typeof(string));
+                return ExpressionHelper.BuildFts(targetMember, constant, isPostgreSql);
+            }
+            case Op.JsonContains:
+            {
+                var constant = Expression.Constant(val.ToString(), typeof(string));
+                return ExpressionHelper.BuildJsonContains(targetMember, constant, isPostgreSql);
             }
             default:
                 throw new NotSupportedException($"Operator '{filter.Operator}' is not supported.");

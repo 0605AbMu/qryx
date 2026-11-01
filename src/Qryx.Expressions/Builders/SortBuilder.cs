@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
 using Qryx.Core.Contracts;
@@ -7,6 +8,7 @@ namespace Qryx.Expressions.Builders;
 
 /// <summary>
 /// Validates SortBy against Entity properties (whitelist) and applies dynamic sorting to IQueryable.
+/// Uses pre-compiled generic invocation delegates and clause caches for zero-allocation performance.
 /// </summary>
 public static class SortBuilder
 {
@@ -21,6 +23,9 @@ public static class SortBuilder
 
     private static readonly MethodInfo ThenByDescendingMethod =
         typeof(Queryable).GetMethods().First(m => m.Name == nameof(Queryable.ThenByDescending) && m.GetParameters().Length == 2);
+
+    private static readonly ConcurrentDictionary<(string SortBy, bool Descending), (string PropertyName, bool IsDescending)[]> ClauseCache = new();
+    private static readonly ConcurrentDictionary<(Type EntityType, string PropertyName, bool IsDescending, bool IsFirst), Func<IQueryable, IQueryable>> SortStepCache = new();
 
     public static IQueryable<TEntity> Apply<TEntity>(
         IQueryable<TEntity> source,
@@ -47,7 +52,7 @@ public static class SortBuilder
         var entityMetadata = MetadataCache.GetEntityMetadata<TEntity>();
 
         // Support multiple comma-separated fields: e.g. "CreatedAt desc, Name asc" or single field
-        var sortClauses = ParseSortClauses(sortBy, isDescending);
+        var sortClauses = ClauseCache.GetOrAdd((sortBy, isDescending), static k => ParseSortClauses(k.SortBy, k.Descending));
 
         IOrderedQueryable<TEntity>? orderedQuery = null;
         bool isFirst = true;
@@ -67,31 +72,38 @@ public static class SortBuilder
                 continue;
             }
 
-            var parameter = Expression.Parameter(typeof(TEntity), "x");
-            var member = ExpressionHelper.BuildMemberAccess(parameter, clause.PropertyName);
-            var lambda = Expression.Lambda(member, parameter);
+            var key = (typeof(TEntity), clause.PropertyName, clause.IsDescending, isFirst);
+            var step = SortStepCache.GetOrAdd(key, static k => CreateSortStep(k.EntityType, k.PropertyName, k.IsDescending, k.IsFirst));
 
-            var methodToCall = isFirst
-                ? (clause.IsDescending ? OrderByDescendingMethod : OrderByMethod)
-                : (clause.IsDescending ? ThenByDescendingMethod : ThenByMethod);
-
-            var genericMethod = methodToCall.MakeGenericMethod(typeof(TEntity), member.Type);
-            var currentQuery = orderedQuery ?? source;
-
-            var resultExpr = Expression.Call(
-                null,
-                genericMethod,
-                currentQuery.Expression,
-                Expression.Quote(lambda));
-
-            orderedQuery = (IOrderedQueryable<TEntity>)currentQuery.Provider.CreateQuery<TEntity>(resultExpr);
+            var currentQuery = (IQueryable)(orderedQuery ?? source);
+            orderedQuery = (IOrderedQueryable<TEntity>)step(currentQuery);
             isFirst = false;
         }
 
         return orderedQuery ?? source;
     }
 
-    private static List<(string PropertyName, bool IsDescending)> ParseSortClauses(string sortBy, bool defaultIsDescending)
+    private static Func<IQueryable, IQueryable> CreateSortStep(Type entityType, string propertyName, bool isDescending, bool isFirst)
+    {
+        var parameter = Expression.Parameter(entityType, "x");
+        var member = ExpressionHelper.BuildMemberAccess(parameter, propertyName);
+        var lambda = Expression.Lambda(member, parameter);
+
+        var methodToCall = isFirst
+            ? (isDescending ? OrderByDescendingMethod : OrderByMethod)
+            : (isDescending ? ThenByDescendingMethod : ThenByMethod);
+
+        var genericMethod = methodToCall.MakeGenericMethod(entityType, member.Type);
+        var quotedLambda = Expression.Quote(lambda);
+
+        return query =>
+        {
+            var resultExpr = Expression.Call(null, genericMethod, query.Expression, quotedLambda);
+            return query.Provider.CreateQuery(resultExpr);
+        };
+    }
+
+    private static (string PropertyName, bool IsDescending)[] ParseSortClauses(string sortBy, bool defaultIsDescending)
     {
         var result = new List<(string PropertyName, bool IsDescending)>();
         var parts = sortBy.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -122,6 +134,6 @@ public static class SortBuilder
             result.Add((propName, desc));
         }
 
-        return result;
+        return result.ToArray();
     }
 }

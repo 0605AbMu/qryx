@@ -18,5 +18,9 @@ public enum Op
     NotIn,
     Between,
     IsNull,
-    IsNotNull
+    IsNotNull,
+    /// <summary>Full-text search (PostgreSQL to_tsvector / @@ or DB equivalent)</summary>
+    Fts,
+    /// <summary>JSON / JSONB containment or text search</summary>
+    JsonContains
 }
