@@ -154,10 +154,7 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
                     .OrderBy(x => GetOperatorPriority(x.Op, x.Prop))
                     .ToList();
 
-                // Static ParameterExpression and PropertyInfo definitions for 0.00 ns reflection
-                sb.AppendLine($"        private static readonly ParameterExpression Param_{safeClassIdent} =");
-                sb.AppendLine($"            Expression.Parameter(typeof({typeParam}), \"x\");");
-
+                // Static PropertyInfo definitions for 0.00 ns reflection
                 foreach (var item in filterProps)
                 {
                     foreach (var target in item.TargetProps)
@@ -182,7 +179,7 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
                 sb.AppendLine($"        {{");
                 sb.AppendLine($"            if (request == null) return query;");
                 sb.AppendLine();
-                sb.AppendLine($"            var p = Param_{safeClassIdent};");
+                sb.AppendLine($"            var p = Expression.Parameter(typeof({typeParam}), \"x\");");
                 sb.AppendLine($"            Expression? body = null;");
                 sb.AppendLine();
 
@@ -200,29 +197,17 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
                 if (implementsQryx)
                 {
                     sb.AppendLine();
-                    sb.AppendLine($"            bool __isDescending = request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> __reqIface ? __reqIface.IsDescending : (request.IsDescending == true);");
-                    sb.AppendLine($"            int __page = request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> __reqPageIface ? __reqPageIface.Page : (request.Page ?? 1);");
-                    sb.AppendLine($"            int __pageSize = request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> __reqSizeIface ? __reqSizeIface.PageSize : (request.PageSize ?? 20);");
-                    sb.AppendLine($"            string? __sortBy = request.SortBy;");
-                    sb.AppendLine($"            object? __afterCursor = request.AfterCursor;");
-                    sb.AppendLine($"            string? __cursorProperty = request.CursorProperty;");
-                    sb.AppendLine();
-                    sb.AppendLine($"            if (!string.IsNullOrWhiteSpace(__sortBy))");
+                    sb.AppendLine($"            if (request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> req)");
                     sb.AppendLine($"            {{");
-                    sb.AppendLine($"                query = Qryx.Expressions.Builders.SortBuilder.Apply(query, __sortBy, __isDescending, false, typeof({fullClassName}));");
-                    sb.AppendLine($"            }}");
-                    sb.AppendLine($"            else");
-                    sb.AppendLine($"            {{");
-                    sb.AppendLine($"                query = Qryx.Expressions.Builders.SortBuilder.EnsureOrdering(query, __isDescending);");
-                    sb.AppendLine($"            }}");
-                    sb.AppendLine();
-                    sb.AppendLine($"            if (__afterCursor != null)");
-                    sb.AppendLine($"            {{");
-                    sb.AppendLine($"                query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, __afterCursor, __pageSize, __cursorProperty, __isDescending);");
-                    sb.AppendLine($"            }}");
-                    sb.AppendLine($"            else");
-                    sb.AppendLine($"            {{");
-                    sb.AppendLine($"                query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, __page, __pageSize);");
+                    sb.AppendLine($"                query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req, false);");
+                    sb.AppendLine($"                if (req.AfterCursor != null)");
+                    sb.AppendLine($"                {{");
+                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, req.AfterCursor, req.PageSize, req.CursorProperty, req.IsDescending);");
+                    sb.AppendLine($"                }}");
+                    sb.AppendLine($"                else");
+                    sb.AppendLine($"                {{");
+                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, req);");
+                    sb.AppendLine($"                }}");
                     sb.AppendLine($"            }}");
                 }
 
