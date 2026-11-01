@@ -135,18 +135,25 @@ public static class ExpressionHelper
                 var compilerField = pType.GetField("_queryCompiler", flags);
                 if (compilerField == null) return _ => false;
 
-                var compilerType = compilerField.FieldType;
-                var genField = compilerType.GetField("_compiledQueryCacheKeyGenerator", flags);
-                if (genField == null) return _ => false;
-
                 return p =>
                 {
                     try
                     {
                         var compiler = compilerField.GetValue(p);
                         if (compiler == null) return false;
-                        var generator = genField.GetValue(compiler);
-                        return generator?.GetType().FullName?.Contains("Npgsql") == true;
+
+                        var compilerType = compiler.GetType();
+                        var genField = compilerType.GetField("_compiledQueryCacheKeyGenerator", flags);
+                        var generator = genField?.GetValue(compiler);
+                        if (generator != null && generator.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
+                            return true;
+
+                        var evalField = compilerType.GetField("_evaluatableExpressionFilter", flags);
+                        var evalFilter = evalField?.GetValue(compiler);
+                        if (evalFilter != null && evalFilter.GetType().FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
+                            return true;
+
+                        return compilerType.FullName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
                     }
                     catch
                     {
@@ -169,14 +176,14 @@ public static class ExpressionHelper
         bool isInvariant,
         bool isPostgreSql)
     {
-        var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
-
+        // 1. Invariant belgilanmagan bo'lsa -> Shunchaki direct LIKE (Starts with)
         if (!isInvariant)
         {
-            var call = Expression.Call(member, StringStartsWithMethod, constant);
-            return Expression.AndAlso(nullGuard, call);
+            return Expression.Call(member, StringStartsWithMethod, constant);
         }
 
+        // 2. Invariant belgilangan bo'lsa:
+        // A) Faqat PostgreSQL uchun -> Native ILIKE
         if (isPostgreSql)
         {
             var ilikeMethod = EfILikeMethod.Value;
@@ -188,13 +195,13 @@ public static class ExpressionHelper
             }
         }
 
+        // B) Boshqa DB provayderlar uchun -> lower()
         var lowerMember = Expression.Call(member, StringToLowerMethod);
         var lowerConst = constant is ConstantExpression { Value: string s }
             ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
             : (Expression)Expression.Call(constant, StringToLowerMethod);
 
-        var lowerCall = Expression.Call(lowerMember, StringStartsWithMethod, lowerConst);
-        return Expression.AndAlso(nullGuard, lowerCall);
+        return Expression.Call(lowerMember, StringStartsWithMethod, lowerConst);
     }
 
     public static Expression BuildEndsWith(
@@ -203,14 +210,14 @@ public static class ExpressionHelper
         bool isInvariant,
         bool isPostgreSql)
     {
-        var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
-
+        // 1. Invariant belgilanmagan bo'lsa -> Shunchaki direct LIKE (Ends with)
         if (!isInvariant)
         {
-            var call = Expression.Call(member, StringEndsWithMethod, constant);
-            return Expression.AndAlso(nullGuard, call);
+            return Expression.Call(member, StringEndsWithMethod, constant);
         }
 
+        // 2. Invariant belgilangan bo'lsa:
+        // A) Faqat PostgreSQL uchun -> Native ILIKE
         if (isPostgreSql)
         {
             var ilikeMethod = EfILikeMethod.Value;
@@ -222,13 +229,13 @@ public static class ExpressionHelper
             }
         }
 
+        // B) Boshqa DB provayderlar uchun -> lower()
         var lowerMember = Expression.Call(member, StringToLowerMethod);
         var lowerConst = constant is ConstantExpression { Value: string s }
             ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
             : (Expression)Expression.Call(constant, StringToLowerMethod);
 
-        var lowerCall = Expression.Call(lowerMember, StringEndsWithMethod, lowerConst);
-        return Expression.AndAlso(nullGuard, lowerCall);
+        return Expression.Call(lowerMember, StringEndsWithMethod, lowerConst);
     }
 
     public static Expression BuildContains(
@@ -237,14 +244,14 @@ public static class ExpressionHelper
         bool isInvariant,
         bool isPostgreSql)
     {
-        var nullGuard = Expression.NotEqual(member, Expression.Constant(null, typeof(string)));
-
+        // 1. Invariant belgilanmagan bo'lsa -> Shunchaki direct LIKE (Contains)
         if (!isInvariant)
         {
-            var call = Expression.Call(member, StringContainsMethod, constant);
-            return Expression.AndAlso(nullGuard, call);
+            return Expression.Call(member, StringContainsMethod, constant);
         }
 
+        // 2. Invariant belgilangan bo'lsa:
+        // A) Faqat PostgreSQL uchun -> Native ILIKE
         if (isPostgreSql)
         {
             var ilikeMethod = EfILikeMethod.Value;
@@ -256,13 +263,13 @@ public static class ExpressionHelper
             }
         }
 
+        // B) Boshqa DB provayderlar uchun -> lower()
         var lowerMember = Expression.Call(member, StringToLowerMethod);
         var lowerConst = constant is ConstantExpression { Value: string s }
             ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
             : (Expression)Expression.Call(constant, StringToLowerMethod);
 
-        var lowerCall = Expression.Call(lowerMember, StringContainsMethod, lowerConst);
-        return Expression.AndAlso(nullGuard, lowerCall);
+        return Expression.Call(lowerMember, StringContainsMethod, lowerConst);
     }
 
     private static Expression BuildPatternConcat(Expression valueExpr, string? prefix, string? suffix)
@@ -374,7 +381,7 @@ public static class ExpressionHelper
         return typeof(object);
     }
 
-    private static MethodInfo? FindEfILikeMethod()
+    public static MethodInfo? FindEfILikeMethod()
     {
         try { Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL"); } catch { }
         return AppDomain.CurrentDomain.GetAssemblies()
@@ -384,7 +391,7 @@ public static class ExpressionHelper
             .FirstOrDefault(m => m.Name == "ILike" && m.GetParameters().Length == 3);
     }
 
-    private static Expression? FindEfFunctionsInstance()
+    public static Expression? FindEfFunctionsInstance()
     {
         try { Assembly.Load("Microsoft.EntityFrameworkCore"); } catch { }
         var efType = AppDomain.CurrentDomain.GetAssemblies()

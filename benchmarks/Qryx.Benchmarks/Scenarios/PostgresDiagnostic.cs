@@ -4,6 +4,7 @@ using Npgsql;
 using Qryx.Benchmarks.Models;
 using Qryx.Benchmarks.Services;
 using Qryx.Expressions.Builders;
+using Qryx.Generated;
 using Gridify;
 
 namespace Qryx.Benchmarks.Scenarios;

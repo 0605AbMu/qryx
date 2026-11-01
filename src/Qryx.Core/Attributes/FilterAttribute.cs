@@ -25,10 +25,12 @@ public sealed class FilterAttribute : Attribute
 
     /// <summary>
     /// Specifies whether string matching operations (StartsWith, EndsWith, Contains) should be case-insensitive (invariant).
+    /// When false (default), uses fast direct LIKE leveraging B-Tree indexes without calling lower()/upper().
     /// When true and targeting PostgreSQL, translates directly to native ILIKE (avoiding lower()/upper() functions).
-    /// Defaults to true.
+    /// When true and targeting other providers, uses lower().
+    /// Defaults to false.
     /// </summary>
-    public bool Invariant { get; init; } = true;
+    public bool Invariant { get; init; } = false;
 
     public FilterAttribute(Op @operator)
     {
