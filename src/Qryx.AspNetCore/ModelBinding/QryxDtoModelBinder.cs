@@ -78,7 +78,7 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         var sortByResult = valueProvider.GetValue("sortBy");
         if (sortByResult != ValueProviderResult.None && sortByResult.Length > 0)
         {
-            var combinedSort = string.Join(",", sortByResult.Values);
+            var combinedSort = string.Join(",", sortByResult.Values.ToArray());
             if (!string.IsNullOrWhiteSpace(combinedSort))
             {
                 SetFast(metadata, dto, nameof(IQryxRequest<object>.SortBy), combinedSort);

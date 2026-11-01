@@ -13,6 +13,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>.NET 10 Microsoft.AspNetCore.OpenApi schema transformer for Qryx query DTOs.</Description>
   </PropertyGroup>
 
   <ItemGroup>

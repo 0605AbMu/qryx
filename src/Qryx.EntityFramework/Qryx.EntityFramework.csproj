@@ -1,9 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>Entity Framework Core integration for Qryx: keyset cursor pagination, projection pushdown, native ILIKE, and ToPagedResultAsync.</Description>
   </PropertyGroup>
 
   <ItemGroup>

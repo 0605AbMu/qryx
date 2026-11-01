@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <Authors>Abdumannon Şamsiyev</Authors>
+    <Company>Qryx</Company>
+    <Copyright>Copyright (c) 2026 Abdumannon Şamsiyev</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/0605AbMu/qryx</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/0605AbMu/qryx</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageTags>linq;efcore;entityframework;filtering;sorting;pagination;odata;gridify;sieve;query;high-performance</PackageTags>
+  </PropertyGroup>
+
+  <!-- Non-packable projects: benchmarks, tests, samples -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('tests')) Or $(MSBuildProjectDirectory.Contains('benchmarks')) Or $(MSBuildProjectDirectory.Contains('samples'))">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>

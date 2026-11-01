@@ -9,6 +9,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>ASP.NET Core Minimal APIs and MVC integration, high-performance query string model binding for Qryx DTOs.</Description>
   </PropertyGroup>
 
   <ItemGroup>

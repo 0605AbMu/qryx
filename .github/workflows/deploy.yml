@@ -1,0 +1,147 @@
+name: Deploy Packages to GitHub Packages
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository (Full History)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full git history needed for tag comparison & folder scan
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet Global Packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Validate Tag & Extract SemVer Version
+        id: versioning
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          # Strip leading 'v' if present (e.g. v1.1.1 -> 1.1.1)
+          CLEAN_VERSION="${RAW_TAG#v}"
+
+          echo "Detected git tag: $RAW_TAG"
+          echo "Parsed version: $CLEAN_VERSION"
+
+          # Strict validation: faqat 1.1.1 (X.Y.Z) formatidagi taglar qabul qilinadi
+          if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$RAW_TAG' noto'g'ri formatda! Faqat 1.1.1 (X.Y.Z) formatidagi raqamli taglar qabul qilinadi."
+            exit 1
+          fi
+
+          echo "VERSION=$CLEAN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Successfully validated version: $CLEAN_VERSION"
+
+      - name: Restore Dependencies
+        run: dotnet restore Qryx.slnx
+
+      - name: Run Unit Tests
+        run: dotnet test tests/Qryx.Tests/Qryx.Tests.csproj -c Release --no-restore --verbosity normal
+
+      - name: Folder Scan and Pack Changed Projects
+        id: pack
+        run: |
+          VERSION="${{ steps.versioning.outputs.VERSION }}"
+          echo "Packaging targeted packages for version: $VERSION"
+
+          mkdir -p artifacts
+
+          # Avvalgi tagni aniqlash
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "Previous release tag: '$PREV_TAG'"
+
+          # Qryx ekotizimidagi barcha 7 ta paket
+          PROJECTS=(
+            "src/Qryx.Core/Qryx.Core.csproj"
+            "src/Qryx.Expressions/Qryx.Expressions.csproj"
+            "src/Qryx.EntityFramework/Qryx.EntityFramework.csproj"
+            "src/Qryx.AspNetCore/Qryx.AspNetCore.csproj"
+            "src/Qryx.SourceGenerator/Qryx.SourceGenerator.csproj"
+            "src/Qryx.OpenApi/Qryx.OpenApi.csproj"
+            "src/Qryx.Swashbuckle/Qryx.Swashbuckle.csproj"
+          )
+
+          PACK_COUNT=0
+
+          for proj in "${PROJECTS[@]}"; do
+            proj_dir=$(dirname "$proj")
+
+            should_pack=false
+
+            if [ -z "$PREV_TAG" ]; then
+              echo "[SCAN] Boshlang'ich release (avvalgi tag yo'q). Barcha paketlar paketlanadi: $proj_dir"
+              should_pack=true
+            else
+              # Folder scan: loyiha papkasida avvalgi tagdan buyon o'zgarish bo'lganmi?
+              CHANGED_FILES=$(git diff --name-only "$PREV_TAG" HEAD -- "$proj_dir")
+              if [ -n "$CHANGED_FILES" ]; then
+                echo "[SCAN] O'zgarish aniqlandi ($proj_dir):"
+                echo "$CHANGED_FILES"
+                should_pack=true
+              else
+                echo "[SCAN] O'zgarish yo'q: $proj_dir (Tashlab ketiladi)"
+              fi
+            fi
+
+            if [ "$should_pack" = true ]; then
+              echo ">>> Packaging $proj [Version: $VERSION]..."
+              dotnet pack "$proj" \
+                -c Release \
+                --no-restore \
+                /p:Version="$VERSION" \
+                /p:PackageVersion="$VERSION" \
+                -o ./artifacts
+              PACK_COUNT=$((PACK_COUNT + 1))
+            fi
+          done
+
+          echo "PACK_COUNT=$PACK_COUNT" >> "$GITHUB_OUTPUT"
+          echo "Total packages created: $PACK_COUNT"
+
+          if [ "$PACK_COUNT" -gt 0 ]; then
+            echo "Artifacts list:"
+            ls -lh ./artifacts
+          fi
+
+      - name: Deploy to GitHub Packages
+        if: steps.pack.outputs.PACK_COUNT > 0
+        run: |
+          echo "Pushing packages to GitHub Packages registry (owner: ${{ github.repository_owner }})..."
+          
+          # Push .nupkg packages
+          dotnet nuget push "./artifacts/*.nupkg" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --skip-duplicate
+
+          # Push symbols (.snupkg) if present
+          if ls ./artifacts/*.snupkg 1> /dev/null 2>&1; then
+            echo "Pushing symbol packages (.snupkg)..."
+            dotnet nuget push "./artifacts/*.snupkg" \
+              --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+              --api-key "${{ secrets.GITHUB_TOKEN }}" \
+              --skip-duplicate || true
+          fi
+
+          echo "Deployment to GitHub Packages completed successfully!"

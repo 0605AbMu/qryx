@@ -1,9 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>Core declarative attributes ([Filter], [Sortable]), contracts (IQryxRequest), and operator enums for the Qryx query engine.</Description>
   </PropertyGroup>
 
 </Project>
