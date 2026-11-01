@@ -1,4 +1,4 @@
-name: Deploy Packages to GitHub Packages
+name: Deploy Packages (GitHub Packages & NuGet.org)
 
 on:
   push:
@@ -145,3 +145,19 @@ jobs:
           fi
 
           echo "Deployment to GitHub Packages completed successfully!"
+
+      - name: Deploy to NuGet.org
+        if: steps.pack.outputs.PACK_COUNT > 0
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::warning::'NUGET_API_KEY' secret topilmadi! NuGet.org ga nashr qilish uchun GitHub omboringiz sozlamalarida (Settings -> Secrets and variables -> Actions) 'NUGET_API_KEY' sirini qo'shing."
+          else
+            echo "Pushing packages to public NuGet.org registry..."
+            dotnet nuget push "./artifacts/*.nupkg" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --api-key "$NUGET_API_KEY" \
+              --skip-duplicate
+            echo "Deployment to NuGet.org completed successfully!"
+          fi
