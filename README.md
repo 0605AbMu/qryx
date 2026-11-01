@@ -38,6 +38,10 @@ samples/
 8. **Ixcham va qulay JSON envelope**: API javobi faqat `items`, `total` va `hasNext` maydonlarini qaytaradi.
 9. **Classic Swashbuckle & Modern OpenAPI**: Classic Swagger UI (`Swashbuckle.AspNetCore`) va .NET 10 ning yangi OpenAPI kutubxonalari bilan to'liq integratsiya.
 10. **Database-Aware Invariant String Matching**: `StartsWith`, `EndsWith`, `Contains` biznes operatorlari uchun `Invariant = true` (standart) bo'lganda, PostgreSQL provayderida avtomatik ravishda native `ILIKE` ga kompilyatsiya qilinadi. Baza ustuniga `lower()` yoki `upper()` funksiyalari o'ralmasligi sababli PostgreSQL B-Tree indekslaridan to'liq foydalaniladi. Boshqa ma'lumotlar bazalarida esa xavfsiz `lower()` fallback ishlatiladi.
+11. **Single-Query Pagination (`IncludeTotalCount = false`)**: `COUNT(*)` so'rovini chetlab o'tib, bitta so'rovda `Take(pageSize + 1)` bilan `items` va `hasNext` ni aniqlaydi. Bazaga tushadigan yuklamani 50% ga qisqartiradi va javob qaytarish vaqtini 2.7x ga tezlashtiradi.
+12. **Zero-Reflection Hot-Path**: `PropertyChainCache` va `SortStepCache` orqali so'rov bajarilish vaqtida barcha reflection lookup'lar, generik metod chaqiruvlari va satr bo'linishlari (`.Split`) butunlay yo'q qilingan; saralash nanosoniyada ishlaydi.
+13. **Keyset Cursor Pagination & NextCursor**: `AfterCursor` orqali cheksiz o'lchamdagi katta jadvallarda $O(\log N)$ tezlikda indeksli sahifalash.
+14. **Ilg'or Operatorlar**: Full-Text Search (`Op.Fts`) va JSONB qidiruv (`Op.JsonContains`).
 
 ---
 
@@ -164,10 +168,11 @@ To'liq benchmark loyihasi [Qryx.Benchmarks](file:///Users/0605abmu/Desktop/work/
 
 | Ko'rsatkich / Sharoit | Qryx | Gridify | Sieve | OData |
 | :--- | :--- | :--- | :--- | :--- |
-| **So'rov tuzish (Construction)** | **8.57 μs** (1.00x) | 30.74 μs (3.59x sekin) | 28.50 μs (3.33x sekin) | 45.30 μs (5.29x sekin) |
-| **Xotira sarfi (Allocated Heap)** | **4.9 KB** | 25.5 KB (5.2x ko'p) | 23.7 KB (4.8x ko'p) | 43.8 KB (8.9x ko'p) |
-| **Real PostgreSQL DB (10k items)** | **653 μs (26.4 KB)** | 602 μs (46.8 KB) | 691 μs (51.4 KB) | 644 μs (69.5 KB) |
-| **Parallel yuklama (Concurrency)** | **1,005,000+ ops/s** | ~185,000 ops/s | ~88,000 ops/s | ~101,000 ops/s |
+| **So'rov tuzish (Construction)** | **7.74 μs** (1.00x) | 29.25 μs (3.78x sekin) | 28.53 μs (3.69x sekin) | 42.03 μs (5.43x sekin) |
+| **Xotira sarfi (Allocated Heap)** | **3.9 KB** (Eng kam!) | 25.2 KB (6.5x ko'p) | 23.5 KB (6.0x ko'p) | 43.9 KB (11.2x ko'p) |
+| **Real PostgreSQL DB (10k items)** | **663 μs (25.2 KB)** | 613 μs (46.3 KB) | 658 μs (51.2 KB) | 635 μs (69.9 KB) |
+| **Parallel yuklama (Concurrency)** | **1,200,000+ ops/s** (833 ns) | ~108,000 ops/s (11x sekin) | ~69,000 ops/s (17x sekin) | ~94,000 ops/s (12x sekin) |
+| **Single-Query Sahifalash (Postgres)** | **287 μs (2.74x tezroq)** | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
 
 Benchmarklarni ishga tushirish:
 ```bash
