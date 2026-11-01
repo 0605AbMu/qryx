@@ -10,8 +10,10 @@ public interface IQryxRequest<TEntity>
     int Page { get; init; }
     int PageSize { get; init; }
     object? AfterCursor { get; init; }
+    string? CursorProperty => null;
     string? SortBy { get; init; }
     bool IsDescending { get; init; }
+    bool IncludeTotalCount => true;
 }
 
 /// <summary>
@@ -25,8 +27,15 @@ public abstract record QryxRequest<TEntity> : IQryxRequest<TEntity>
     public int? Page { get; init; } = 1;
     public int? PageSize { get; init; } = 20;
     public string? AfterCursor { get; init; }
+    public string? CursorProperty { get; init; }
     public string? SortBy { get; init; }
     public bool? IsDescending { get; init; } = false;
+
+    /// <summary>
+    /// When true (default), executes CountAsync() to provide Total count.
+    /// When false or when AfterCursor is used, skips CountAsync() for a single fast database roundtrip.
+    /// </summary>
+    public bool? IncludeTotalCount { get; init; } = true;
 
     int IQryxRequest<TEntity>.Page
     {
@@ -46,9 +55,13 @@ public abstract record QryxRequest<TEntity> : IQryxRequest<TEntity>
         init => AfterCursor = value?.ToString();
     }
 
+    string? IQryxRequest<TEntity>.CursorProperty => CursorProperty;
+
     bool IQryxRequest<TEntity>.IsDescending
     {
         get => IsDescending ?? false;
         init => IsDescending = value;
     }
+
+    bool IQryxRequest<TEntity>.IncludeTotalCount => IncludeTotalCount ?? true;
 }

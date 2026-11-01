@@ -146,5 +146,87 @@ public static class PostgresDiagnostic
         Console.WriteLine($"\n[3] Xulosa:");
         Console.WriteLine($"    -> PostgreSQL 'lower()' funksiyasi narxi: {qryxDbRawTime - qryxExactDbRawTime:F2} μs");
         Console.WriteLine($"    -> .NET C# qatlamida Qryx Gridifydan:    {(gridifyEfTime - gridifyDbRawTime) - (qryxEfTime - qryxDbRawTime):F2} μs TEZROQ!");
+
+        RunPaginationComparisonAsync().GetAwaiter().GetResult();
+    }
+
+    public static async Task RunPaginationComparisonAsync()
+    {
+        Console.WriteLine("\n=== PAGINATION STRATEGY BENCHMARK (Real PostgreSQL, 500 iters) ===");
+        using var db = new PostgresBenchmarkDbContext();
+
+        var standardDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            Page = 2,
+            PageSize = 20,
+            IncludeTotalCount = true
+        };
+
+        var singleQueryDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            Page = 2,
+            PageSize = 20,
+            IncludeTotalCount = false
+        };
+
+        var cursorDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            PageSize = 20,
+            AfterCursor = "2000"
+        };
+
+        // Warmup
+        for (int i = 0; i < 10; i++)
+        {
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), standardDto);
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), singleQueryDto);
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), cursorDto);
+        }
+
+        const int iters = 500;
+
+        // 1. Standard (Count + Skip/Take, 2 roundtrips)
+        var sw1 = Stopwatch.StartNew();
+        for (int i = 0; i < iters; i++)
+        {
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), standardDto);
+        }
+        sw1.Stop();
+        double standardTime = (sw1.Elapsed.TotalMilliseconds * 1000.0) / iters;
+
+        // 2. Single-Query (Skip COUNT(*), 1 roundtrip)
+        var sw2 = Stopwatch.StartNew();
+        for (int i = 0; i < iters; i++)
+        {
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), singleQueryDto);
+        }
+        sw2.Stop();
+        double singleQueryTime = (sw2.Elapsed.TotalMilliseconds * 1000.0) / iters;
+
+        // 3. Keyset Cursor (B-Tree Seek, 1 roundtrip)
+        var sw3 = Stopwatch.StartNew();
+        for (int i = 0; i < iters; i++)
+        {
+            await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users.AsNoTracking(), cursorDto);
+        }
+        sw3.Stop();
+        double cursorTime = (sw3.Elapsed.TotalMilliseconds * 1000.0) / iters;
+
+        Console.WriteLine($"+------------------------------------------+-------------+---------------+");
+        Console.WriteLine($"| Pagination Strategy                      | Time/Op     | Speedup       |");
+        Console.WriteLine($"+------------------------------------------+-------------+---------------+");
+        Console.WriteLine($"| Standard (CountAsync + Data, 2 queries)  | {standardTime,9:F2} μs | 1.00x (Base)  |");
+        Console.WriteLine($"| Single-Query (No Count, 1 query)         | {singleQueryTime,9:F2} μs | {standardTime / singleQueryTime,5:F2}x faster |");
+        Console.WriteLine($"| Keyset Cursor (Index Seek, 1 query)      | {cursorTime,9:F2} μs | {standardTime / cursorTime,5:F2}x faster |");
+        Console.WriteLine($"+------------------------------------------+-------------+---------------+");
     }
 }
