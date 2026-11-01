@@ -51,6 +51,11 @@ public static class SortBuilder
 
         var entityMetadata = MetadataCache.GetEntityMetadata<TEntity>();
 
+        if (ClauseCache.Count > 5000)
+        {
+            ClauseCache.Clear();
+        }
+
         // Support multiple comma-separated fields: e.g. "CreatedAt desc, Name asc" or single field
         var sortClauses = ClauseCache.GetOrAdd((sortBy, isDescending), static k => ParseSortClauses(k.SortBy, k.Descending));
 

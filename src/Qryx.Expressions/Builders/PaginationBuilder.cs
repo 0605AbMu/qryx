@@ -37,7 +37,10 @@ public static class PaginationBuilder
         var clampedPage = ClampPage(page);
         var clampedPageSize = ClampPageSize(pageSize, maxPageSize);
 
-        return source.Skip((clampedPage - 1) * clampedPageSize).Take(clampedPageSize);
+        long skipLong = ((long)clampedPage - 1) * clampedPageSize;
+        int skip = skipLong > int.MaxValue ? int.MaxValue : (int)skipLong;
+
+        return source.Skip(skip).Take(clampedPageSize);
     }
 
     /// <summary>

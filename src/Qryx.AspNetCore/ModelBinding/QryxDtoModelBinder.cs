@@ -126,15 +126,22 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
 
     private static object? ConvertSingleValue(string str, Type targetType)
     {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        try
+        {
+            var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
 
-        if (underlying.IsEnum)
-            return Enum.Parse(underlying, str, ignoreCase: true);
+            if (underlying.IsEnum)
+                return Enum.Parse(underlying, str, ignoreCase: true);
 
-        if (underlying == typeof(Guid))
-            return Guid.Parse(str);
+            if (underlying == typeof(Guid))
+                return Guid.Parse(str);
 
-        return Convert.ChangeType(str, underlying, CultureInfo.InvariantCulture);
+            return Convert.ChangeType(str, underlying, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void SetNamedProperty(object target, string propName, object? value)

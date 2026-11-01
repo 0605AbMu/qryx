@@ -88,10 +88,13 @@ public static class QryxExtensions
         var page = PaginationBuilder.ClampPage(request.Page);
         var filteredQuery = source.ApplyQryx(request);
 
+        long skipLong = ((long)page - 1) * pageSize;
+        int skip = skipLong > int.MaxValue ? int.MaxValue : (int)skipLong;
+
         if (!request.IncludeTotalCount)
         {
             var items = await filteredQuery
-                .Skip((page - 1) * pageSize)
+                .Skip(skip)
                 .Take(pageSize + 1)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
@@ -115,7 +118,7 @@ public static class QryxExtensions
         // 3. Standard Pagination with Total Count
         var totalCount = await filteredQuery.CountAsync(ct).ConfigureAwait(false);
         var pagedItems = await filteredQuery
-            .Skip((page - 1) * pageSize)
+            .Skip(skip)
             .Take(pageSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -177,10 +180,13 @@ public static class QryxExtensions
         var page = PaginationBuilder.ClampPage(request.Page);
         var filteredQuery = source.ApplyQryx(request);
 
+        long skipLong = ((long)page - 1) * pageSize;
+        int skip = skipLong > int.MaxValue ? int.MaxValue : (int)skipLong;
+
         if (!request.IncludeTotalCount)
         {
             var items = await filteredQuery
-                .Skip((page - 1) * pageSize)
+                .Skip(skip)
                 .Take(pageSize + 1)
                 .Select(selector)
                 .ToListAsync(ct)
@@ -205,7 +211,7 @@ public static class QryxExtensions
         // 3. Standard Pagination with Total Count
         var totalCount = await filteredQuery.CountAsync(ct).ConfigureAwait(false);
         var pagedItems = await filteredQuery
-            .Skip((page - 1) * pageSize)
+            .Skip(skip)
             .Take(pageSize)
             .Select(selector)
             .ToListAsync(ct)
