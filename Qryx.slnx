@@ -5,6 +5,9 @@
   <Folder Name="/samples/">
     <Project Path="samples/Qryx.SampleApi/Qryx.SampleApi.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Qryx.Tests/Qryx.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Qryx.AspNetCore/Qryx.AspNetCore.csproj" />
     <Project Path="src/Qryx.Core/Qryx.Core.csproj" />

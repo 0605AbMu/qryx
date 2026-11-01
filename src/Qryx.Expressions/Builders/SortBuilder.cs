@@ -35,7 +35,12 @@ public static class SortBuilder
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
 
-        return Apply(source, request.SortBy, request.IsDescending, throwOnInvalidProperty, request.GetType());
+        if (!string.IsNullOrWhiteSpace(request.SortBy))
+        {
+            return Apply(source, request.SortBy, request.IsDescending, throwOnInvalidProperty, request.GetType());
+        }
+
+        return EnsureOrdering(source, request.IsDescending);
     }
 
     public static IQueryable<TEntity> Apply<TEntity>(
@@ -94,6 +99,13 @@ public static class SortBuilder
         if (!entityMetadata.HasProperty(propertyName))
             return false;
 
+        // Primary key (e.g. "Id" or EntityId) is ALWAYS permitted for deterministic pagination & keyset cursor
+        if (string.Equals(propertyName, entityMetadata.PrimaryKeyProperty?.Name, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(propertyName, "Id", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         // 1. Check DTO Opt-in whitelist
         if (dtoType != null)
         {
@@ -112,6 +124,81 @@ public static class SortBuilder
 
         // 3. Fallback: If no [Sortable] was defined anywhere on DTO or Entity, allow property
         return true;
+    }
+
+    /// <summary>
+    /// Applies sorting directly by property name, bypassing external user input whitelist validation.
+    /// Used internally for cursor-based keyset pagination and deterministic primary key fallbacks.
+    /// </summary>
+    public static IQueryable<TEntity> ApplyDirect<TEntity>(
+        IQueryable<TEntity> source,
+        string propertyName,
+        bool isDescending = false)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (string.IsNullOrWhiteSpace(propertyName))
+            return source;
+
+        var key = (typeof(TEntity), propertyName, isDescending, true);
+        var step = SortStepCache.GetOrAdd(key, static k => CreateSortStep(k.EntityType, k.PropertyName, k.IsDescending, k.IsFirst));
+        return (IQueryable<TEntity>)step(source);
+    }
+
+    public static bool HasOrdering(IQueryable query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var expr = query.Expression;
+        while (expr != null)
+        {
+            if (expr is MethodCallExpression methodCall)
+            {
+                var name = methodCall.Method.Name;
+                if (name is nameof(Queryable.OrderBy) or nameof(Queryable.OrderByDescending)
+                    or nameof(Queryable.ThenBy) or nameof(Queryable.ThenByDescending))
+                {
+                    return true;
+                }
+
+                if (methodCall.Arguments.Count == 0)
+                    break;
+
+                expr = methodCall.Arguments[0];
+            }
+            else if (expr is UnaryExpression unary)
+            {
+                expr = unary.Operand;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return false;
+    }
+
+    public static IQueryable<TEntity> EnsureOrdering<TEntity>(
+        IQueryable<TEntity> source,
+        bool isDescending = false)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (HasOrdering(source))
+            return source;
+
+        var entityMetadata = MetadataCache.GetEntityMetadata<TEntity>();
+        var defaultProp = entityMetadata.PrimaryKeyProperty?.Name;
+
+        if (defaultProp != null && entityMetadata.HasProperty(defaultProp))
+        {
+            return ApplyDirect(source, defaultProp, isDescending);
+        }
+
+        if (entityMetadata.HasProperty("Id"))
+        {
+            return ApplyDirect(source, "Id", isDescending);
+        }
+
+        return source;
     }
 
     private static Func<IQueryable, IQueryable> CreateSortStep(Type entityType, string propertyName, bool isDescending, bool isFirst)

@@ -45,14 +45,36 @@ public sealed class EntityMetadata
         Properties = dict;
         SortableProperties = sortableSet;
 
-        // Try find standard Id or EntityId
-        if (dict.TryGetValue("Id", out var idProp))
+        // Resolve Primary Key:
+        // 1. Property with [Key] attribute
+        PropertyInfo? keyProp = null;
+        foreach (var p in dict.Values)
+        {
+            if (p.GetCustomAttributes().Any(a => a.GetType().Name == "KeyAttribute"))
+            {
+                keyProp = p;
+                break;
+            }
+        }
+
+        if (keyProp != null)
+        {
+            PrimaryKeyProperty = keyProp;
+        }
+        else if (dict.TryGetValue("Id", out var idProp))
         {
             PrimaryKeyProperty = idProp;
         }
         else if (dict.TryGetValue($"{entityType.Name}Id", out var namedIdProp))
         {
             PrimaryKeyProperty = namedIdProp;
+        }
+        else
+        {
+            // Fallback: any property ending with "Id" or first primitive/scalar property
+            var fallbackId = dict.Values.FirstOrDefault(p => p.Name.EndsWith("Id", StringComparison.OrdinalIgnoreCase))
+                             ?? dict.Values.FirstOrDefault(p => p.PropertyType.IsPrimitive || p.PropertyType == typeof(string) || p.PropertyType == typeof(Guid) || p.PropertyType == typeof(DateTime) || p.PropertyType == typeof(DateTimeOffset));
+            PrimaryKeyProperty = fallbackId;
         }
     }
 

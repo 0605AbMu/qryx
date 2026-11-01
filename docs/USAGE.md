@@ -460,25 +460,44 @@ Ishlab chiqarish (production) muhitida eng ko'p uchraydigan xatolar va ularning 
 * Qryx bo'sh satrlar (`""`) yoki `null` qiymatlarni filtr sifatida qabul qilmaydi va ularni avtomatik ravishda chetlab o'tadi (ignore qiladi).
 * Shu sababli, DTO laringizdagi barcha xossalar **nullable** bo'lishi kerak (`int?`, `string?`, `DateTime?`). Agar `int Age` (non-nullable) qilsangiz, DTO standart `0` qiymatini oladi va Qryx bazadan `Age == 0` bo'lganlarni qidirib ketadi!
 
-### ⚠️ Kritik Nuqta 6: Maxfiy Ustunlar Bo'yicha Saralashni Cheklash (`[NotSortable]`)
-* **Xavf**: Agar Entity'da `PasswordHash`, `Salary`, `TwoFactorSecret` kabi maxfiy ustunlar bo'lsa, tajovuzkor `?sortBy=PasswordHash` yoki `?sortBy=Salary` deb so'rov yuborishi va qaytgan ma'lumotlar tartibiga qarab (Side-Channel Inference) maxfiy ma'lumotlarni taxmin qilishi mumkin.
-* **Yechim**: Maxfiy ustunlarni `[NotSortable]` atributi bilan belgilang:
+### ⚠️ Kritik Nuqta 6: Saralash Xavfsizligi va Opt-In Oq Ro'yxat (`[Sortable]`, `[NotSortable]`)
+* **Xavf**: Agar saralash cheklanmasa, foydalanuvchi `PasswordHash`, `Salary`, `TwoFactorSecret` kabi maxfiy ustunlar yoki indekslanmagan millionlab qatorli matn ustunlari bo'yicha saralash so'rashi mumkin (bu ham xavfsizlikka ziyon, ham CPU/Disk I/O ni 100% ga chiqaradi).
+* **Eng optimal yondashuv (Opt-In Whitelist)**:
+  - Saralash ruxsat etilgan maydonlarga `[Sortable]` qo'ying:
   ```csharp
+  public record GetUsersQuery : QryxRequest<User>
+  {
+      [Sortable] // Faqat Name bo'yicha saralashga ruxsat
+      public string? Name { get; init; }
+
+      [Sortable] // CreatedAt bo'yicha ruxsat
+      public DateTime? CreatedAt { get; init; }
+  }
+  ```
+  - Yoki Entity sinfida:
+  ```csharp
+  [Sortable(nameof(Name), nameof(CreatedAt))]
   public class User
   {
       public int Id { get; set; }
       public string Name { get; set; }
 
-      [NotSortable]
+      [NotSortable] // Maxfiy ustun mutlaq taqiqlangan
       public string PasswordHash { get; set; }
-
-      [NotSortable]
-      public decimal Salary { get; set; }
   }
   ```
-  Qryx bu ustunlar bo'yicha kelgan har qanday `sortBy` so'rovlarini e'tiborsiz qoldiradi va xavfsizlikni ta'minlaydi.
 
-### ⚠️ Kritik Nuqta 7: Katta To'plamlar DoS Himoyasi (`Op.In` / `Op.NotIn`)
+### ⚠️ Kritik Nuqta 7: Deterministik Sahifalash va SQL Server `OFFSET / FETCH` `ORDER BY` Talabi
+* **SQL Server T-SQL Qoidasi**: SQL Server'da `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY` (ya'ni `.Skip().Take()`) sintaksisi **albatta `ORDER BY` bo'lishini talab qiladi**. Aks holda `SqlException: A TOP or FETCH clause cannot be used with an OFFSET clause without an ORDER BY clause` xatoligi bilan qulaydi.
+* **PostgreSQL / SQLite Determinizmi**: Garchi PostgreSQL va SQLite `LIMIT/OFFSET` da `ORDER BY` siz ishlashiga ruxsat bersa-da, qatorlarning fizik tartibi kafolatlanmaydi — natijada 1-sahifadagi ma'lumotlar 2-sahifada qayta chiqishi yoki ba'zi yozuvlar tushib qolishi mumkin!
+* **Qryx Yechimi (`EnsureOrdering`)**:
+  Qryx barcha 4 xil holatni avtomatik va 100% kafolat bilan hal qiladi:
+  1. **Klient `sortBy` yuborgan holat**: Qryx xavfsizlik oq ro'yxatini (`[Sortable]`) tekshirib, ko'rsatilgan ustun bo'yicha saralaydi.
+  2. **Klient `sortBy` yubormagan holat**: Qryx avtomatik ravishda Entity'ning Primary Key ustunini (`[Key]`, `Id`, yoki `{Entity}Id`) aniqlaydi va bazaga xavfsiz tartib beradi.
+  3. **Dasturchi Qryx'dan oldin `.OrderBy(...)` bergan holat**: Qryx'ning `HasOrdering` AST tekshiruvchisi dasturchining mavjud saralashini aniqlaydi va uni aslo o'chirib tashlamaydi.
+  4. **Keyset / Cursor sahifalash**: Cursor ustuni doimo deterministik B-Tree indeksi bo'yicha tartiblanadi.
+
+### ⚠️ Kritik Nuqta 8: Katta To'plamlar DoS Himoyasi (`Op.In` / `Op.NotIn`)
 * SQL Server maksimal 2,100 ta parametr, SQLite esa 999 ta parametr qabul qiladi.
 * Agar klient `?status=1&status=2...` deb 5,000 ta qiymat yuborsa, Qryx avtomatik ravishda dastlabki `QryxConstants.DefaultMaxInCollectionSize` (1,000) ta element bilan cheklaydi, bazani va serverni qulashdan himoya qiladi.
 

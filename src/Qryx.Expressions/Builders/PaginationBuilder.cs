@@ -40,7 +40,8 @@ public static class PaginationBuilder
         long skipLong = ((long)clampedPage - 1) * clampedPageSize;
         int skip = skipLong > int.MaxValue ? int.MaxValue : (int)skipLong;
 
-        return source.Skip(skip).Take(clampedPageSize);
+        var ordered = SortBuilder.EnsureOrdering(source);
+        return ordered.Skip(skip).Take(clampedPageSize);
     }
 
     /// <summary>
@@ -89,8 +90,8 @@ public static class PaginationBuilder
         var filterLambda = Expression.Lambda<Func<TEntity, bool>>(comparison, parameter);
         var filtered = source.Where(filterLambda);
 
-        // Apply ordering by cursor
-        var ordered = SortBuilder.Apply(filtered, propName, isDescending);
+        // Apply ordering by cursor directly
+        var ordered = SortBuilder.ApplyDirect(filtered, propName, isDescending);
 
         var clampedPageSize = ClampPageSize(pageSize, maxPageSize);
         return ordered.Take(clampedPageSize);

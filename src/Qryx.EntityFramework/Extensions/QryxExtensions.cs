@@ -257,8 +257,11 @@ public static class QryxExtensions
         var page = PaginationBuilder.ClampPage(request.Page);
         var filteredQuery = source.ApplyQryx(request);
 
+        long skipLong = ((long)page - 1) * pageSize;
+        int skip = skipLong > int.MaxValue ? int.MaxValue : (int)skipLong;
+
         return filteredQuery
-            .Skip((page - 1) * pageSize)
+            .Skip(skip)
             .Take(pageSize)
             .AsAsyncEnumerable();
     }
@@ -296,8 +299,11 @@ public static class QryxExtensions
         var page = PaginationBuilder.ClampPage(request.Page);
         var filteredQuery = source.ApplyQryx(request);
 
+        long skipLongProj = ((long)page - 1) * pageSize;
+        int skipProj = skipLongProj > int.MaxValue ? int.MaxValue : (int)skipLongProj;
+
         return filteredQuery
-            .Skip((page - 1) * pageSize)
+            .Skip(skipProj)
             .Take(pageSize)
             .Select(selector)
             .AsAsyncEnumerable();

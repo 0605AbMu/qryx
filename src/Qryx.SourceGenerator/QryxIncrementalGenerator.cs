@@ -174,6 +174,10 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
                 sb.AppendLine($"                {{");
                 sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req.SortBy, req.IsDescending, false);");
                 sb.AppendLine($"                }}");
+                sb.AppendLine($"                else");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.EnsureOrdering(query, req.IsDescending);");
+                sb.AppendLine($"                }}");
                 sb.AppendLine();
                 sb.AppendLine($"                if (req.AfterCursor != null)");
                 sb.AppendLine($"                {{");
@@ -192,6 +196,10 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
                 sb.AppendLine($"                if (!string.IsNullOrWhiteSpace(req.SortBy))");
                 sb.AppendLine($"                {{");
                 sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req.SortBy, req.IsDescending, false);");
+                sb.AppendLine($"                }}");
+                sb.AppendLine($"                else");
+                sb.AppendLine($"                {{");
+                sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.EnsureOrdering(query, req.IsDescending);");
                 sb.AppendLine($"                }}");
                 sb.AppendLine();
                 sb.AppendLine($"                if (req.AfterCursor != null)");
