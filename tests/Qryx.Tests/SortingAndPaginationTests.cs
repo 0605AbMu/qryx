@@ -364,4 +364,51 @@ public class SortingAndPaginationTests
         Assert.Equal("Alice", list[0].Name);
         Assert.Equal("Zack", list[1].Name);
     }
+
+    [Fact]
+    public void BuildStartsWith_ShouldUseDirectLike_WhenInvariantIsFalse()
+    {
+        var param = Expression.Parameter(typeof(StandardUser), "x");
+        var member = Expression.Property(param, nameof(StandardUser.Name));
+        var constant = Expression.Constant("Ali");
+
+        // When isInvariant is false, it should call Name.StartsWith("Ali") directly without ToUpper/ToLower
+        var expr = ExpressionHelper.BuildStartsWith(member, constant, isInvariant: false, isPostgreSql: false);
+        var exprStr = expr.ToString();
+
+        Assert.Contains("StartsWith", exprStr);
+        Assert.DoesNotContain("ToUpper", exprStr);
+        Assert.DoesNotContain("ToLower", exprStr);
+    }
+
+    [Fact]
+    public void BuildStartsWith_ShouldUseToUpper_WhenInvariantIsTrue_OnNonPostgreSql()
+    {
+        var param = Expression.Parameter(typeof(StandardUser), "x");
+        var member = Expression.Property(param, nameof(StandardUser.Name));
+        var constant = Expression.Constant("Ali");
+
+        // On Non-PostgreSQL with invariant = true, it should use ToUpper() / UPPER
+        var expr = ExpressionHelper.BuildStartsWith(member, constant, isInvariant: true, isPostgreSql: false);
+        var exprStr = expr.ToString();
+
+        Assert.Contains("ToUpper", exprStr);
+        Assert.DoesNotContain("ToLower", exprStr);
+    }
+
+    [Fact]
+    public void BuildStartsWith_ShouldUseILike_WhenInvariantIsTrue_OnPostgreSql()
+    {
+        var param = Expression.Parameter(typeof(StandardUser), "x");
+        var member = Expression.Property(param, nameof(StandardUser.Name));
+        var constant = Expression.Constant("Ali");
+
+        // On PostgreSQL with invariant = true, it should use EF.Functions.ILike
+        var expr = ExpressionHelper.BuildStartsWith(member, constant, isInvariant: true, isPostgreSql: true);
+        var exprStr = expr.ToString();
+
+        Assert.Contains("ILike", exprStr);
+        Assert.DoesNotContain("ToLower", exprStr);
+        Assert.DoesNotContain("ToUpper", exprStr);
+    }
 }

@@ -10,8 +10,8 @@ namespace Qryx.Expressions.Builders;
 /// </summary>
 public static class ExpressionHelper
 {
-    private static readonly MethodInfo StringToLowerMethod =
-        typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
+    private static readonly MethodInfo StringToUpperMethod =
+        typeof(string).GetMethod(nameof(string.ToUpper), Type.EmptyTypes)!;
 
     private static readonly MethodInfo StringStartsWithMethod =
         typeof(string).GetMethod(nameof(string.StartsWith), [typeof(string)])!;
@@ -195,13 +195,13 @@ public static class ExpressionHelper
             }
         }
 
-        // B) Boshqa DB provayderlar uchun -> lower()
-        var lowerMember = Expression.Call(member, StringToLowerMethod);
-        var lowerConst = constant is ConstantExpression { Value: string s }
-            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
-            : (Expression)Expression.Call(constant, StringToLowerMethod);
+        // B) Boshqa DB provayderlar uchun (SQL Server, SQLite, Oracle) -> UPPER() va ToUpperInvariant()
+        var upperMember = Expression.Call(member, StringToUpperMethod);
+        var upperConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToUpperInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToUpperMethod);
 
-        return Expression.Call(lowerMember, StringStartsWithMethod, lowerConst);
+        return Expression.Call(upperMember, StringStartsWithMethod, upperConst);
     }
 
     public static Expression BuildEndsWith(
@@ -229,13 +229,13 @@ public static class ExpressionHelper
             }
         }
 
-        // B) Boshqa DB provayderlar uchun -> lower()
-        var lowerMember = Expression.Call(member, StringToLowerMethod);
-        var lowerConst = constant is ConstantExpression { Value: string s }
-            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
-            : (Expression)Expression.Call(constant, StringToLowerMethod);
+        // B) Boshqa DB provayderlar uchun (SQL Server, SQLite, Oracle) -> UPPER() va ToUpperInvariant()
+        var upperMember = Expression.Call(member, StringToUpperMethod);
+        var upperConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToUpperInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToUpperMethod);
 
-        return Expression.Call(lowerMember, StringEndsWithMethod, lowerConst);
+        return Expression.Call(upperMember, StringEndsWithMethod, upperConst);
     }
 
     public static Expression BuildContains(
@@ -263,13 +263,13 @@ public static class ExpressionHelper
             }
         }
 
-        // B) Boshqa DB provayderlar uchun -> lower()
-        var lowerMember = Expression.Call(member, StringToLowerMethod);
-        var lowerConst = constant is ConstantExpression { Value: string s }
-            ? Expression.Constant(s.ToLowerInvariant(), typeof(string))
-            : (Expression)Expression.Call(constant, StringToLowerMethod);
+        // B) Boshqa DB provayderlar uchun (SQL Server, SQLite, Oracle) -> UPPER() va ToUpperInvariant()
+        var upperMember = Expression.Call(member, StringToUpperMethod);
+        var upperConst = constant is ConstantExpression { Value: string s }
+            ? Expression.Constant(s.ToUpperInvariant(), typeof(string))
+            : (Expression)Expression.Call(constant, StringToUpperMethod);
 
-        return Expression.Call(lowerMember, StringContainsMethod, lowerConst);
+        return Expression.Call(upperMember, StringContainsMethod, upperConst);
     }
 
     private static Expression BuildPatternConcat(Expression valueExpr, string? prefix, string? suffix)
