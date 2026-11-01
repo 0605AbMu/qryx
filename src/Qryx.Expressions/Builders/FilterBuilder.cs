@@ -40,9 +40,11 @@ public static class FilterBuilder
 
         var parameter = Expression.Parameter(typeof(TEntity), "x");
         Expression? combined = null;
+        var filters = dtoMetadata.Filters;
 
-        foreach (var filter in dtoMetadata.Filters)
+        for (int fIndex = 0; fIndex < filters.Count; fIndex++)
         {
+            var filter = filters[fIndex];
             var val = filter.Getter(request);
             if (val == null)
                 continue;

@@ -47,6 +47,7 @@ public static class MetadataCache
 
             var (isCollection, collectionElementType) = AnalyzeCollectionType(prop.PropertyType);
             var getter = CompileGetter(dtoType, prop);
+            var setter = CompileSetter(dtoType, prop);
 
             IReadOnlyList<string> targetPaths;
             if (filterAttr.TargetProperties != null && filterAttr.TargetProperties.Length > 0)
@@ -71,6 +72,7 @@ public static class MetadataCache
                 Operator = filterAttr.Operator,
                 Invariant = filterAttr.Invariant,
                 Getter = getter,
+                Setter = setter,
                 IsCollection = isCollection,
                 CollectionElementType = collectionElementType
             });
@@ -79,10 +81,24 @@ public static class MetadataCache
         // Optimize short-circuit evaluation order: cheap scalar filters first, expensive text/compound filters last
         filterProps.Sort(static (a, b) => GetFilterWeight(a).CompareTo(GetFilterWeight(b)));
 
+        var standardSetters = new Dictionary<string, Action<object, object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in properties)
+        {
+            if (prop.CanWrite)
+            {
+                var s = CompileSetter(dtoType, prop);
+                if (s != null)
+                {
+                    standardSetters[prop.Name] = s;
+                }
+            }
+        }
+
         return new DtoMetadata
         {
             DtoType = dtoType,
-            Filters = filterProps
+            Filters = filterProps,
+            StandardSetters = standardSetters
         };
     }
 
@@ -141,6 +157,28 @@ public static class MetadataCache
         var propAccess = Expression.Property(cast, propInfo);
         var boxed = Expression.Convert(propAccess, typeof(object));
         return Expression.Lambda<Func<object, object?>>(boxed, param).Compile();
+    }
+
+    private static Action<object, object?>? CompileSetter(Type dtoType, PropertyInfo propInfo)
+    {
+        if (!propInfo.CanWrite)
+            return null;
+
+        try
+        {
+            var targetParam = Expression.Parameter(typeof(object), "target");
+            var valueParam = Expression.Parameter(typeof(object), "value");
+
+            var castTarget = Expression.Convert(targetParam, dtoType);
+            var castValue = Expression.Convert(valueParam, propInfo.PropertyType);
+
+            var assign = Expression.Assign(Expression.Property(castTarget, propInfo), castValue);
+            return Expression.Lambda<Action<object, object?>>(assign, targetParam, valueParam).Compile();
+        }
+        catch
+        {
+            return (target, val) => propInfo.SetValue(target, val);
+        }
     }
 
     private static string ResolvePrefixProperty(string propName)

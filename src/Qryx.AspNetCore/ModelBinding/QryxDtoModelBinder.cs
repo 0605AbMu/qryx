@@ -28,7 +28,7 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
 
         // Bind standard request properties
-        BindStandardProperties(dto, valueProvider);
+        BindStandardProperties(dto, dtoMetadata, valueProvider);
 
         // Bind filter properties
         foreach (var filter in dtoMetadata.Filters)
@@ -40,7 +40,7 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
                 var colVal = BindCollection(propName, filter.CollectionElementType, valueProvider);
                 if (colVal != null)
                 {
-                    SetPropertyValue(filter.DtoProperty, dto, colVal);
+                    filter.Setter?.Invoke(dto, colVal);
                 }
             }
             else
@@ -51,7 +51,7 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
                     var converted = ConvertSingleValue(rawResult.FirstValue, filter.DtoPropertyType);
                     if (converted != null)
                     {
-                        SetPropertyValue(filter.DtoProperty, dto, converted);
+                        filter.Setter?.Invoke(dto, converted);
                     }
                 }
             }
@@ -61,36 +61,44 @@ public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
         return Task.CompletedTask;
     }
 
-    private static void BindStandardProperties(object dto, IValueProvider valueProvider)
+    private static void BindStandardProperties(object dto, DtoMetadata metadata, IValueProvider valueProvider)
     {
         var pageResult = valueProvider.GetValue("page");
         if (pageResult != ValueProviderResult.None && int.TryParse(pageResult.FirstValue, out var page))
         {
-            SetNamedProperty(dto, nameof(IQryxRequest<object>.Page), Math.Max(page, 1));
+            SetFast(metadata, dto, nameof(IQryxRequest<object>.Page), Math.Max(page, 1));
         }
 
         var pageSizeResult = valueProvider.GetValue("pageSize");
         if (pageSizeResult != ValueProviderResult.None && int.TryParse(pageSizeResult.FirstValue, out var pageSize))
         {
-            SetNamedProperty(dto, nameof(IQryxRequest<object>.PageSize), Math.Clamp(pageSize <= 0 ? QryxConstants.DefaultPageSize : pageSize, 1, QryxConstants.DefaultMaxPageSize));
+            SetFast(metadata, dto, nameof(IQryxRequest<object>.PageSize), Math.Clamp(pageSize <= 0 ? QryxConstants.DefaultPageSize : pageSize, 1, QryxConstants.DefaultMaxPageSize));
         }
 
         var sortByResult = valueProvider.GetValue("sortBy");
         if (sortByResult != ValueProviderResult.None && !string.IsNullOrWhiteSpace(sortByResult.FirstValue))
         {
-            SetNamedProperty(dto, nameof(IQryxRequest<object>.SortBy), sortByResult.FirstValue);
+            SetFast(metadata, dto, nameof(IQryxRequest<object>.SortBy), sortByResult.FirstValue);
         }
 
         var isDescResult = valueProvider.GetValue("isDescending");
         if (isDescResult != ValueProviderResult.None && bool.TryParse(isDescResult.FirstValue, out var isDesc))
         {
-            SetNamedProperty(dto, nameof(IQryxRequest<object>.IsDescending), isDesc);
+            SetFast(metadata, dto, nameof(IQryxRequest<object>.IsDescending), isDesc);
         }
 
         var cursorResult = valueProvider.GetValue("afterCursor");
         if (cursorResult != ValueProviderResult.None && !string.IsNullOrWhiteSpace(cursorResult.FirstValue))
         {
-            SetNamedProperty(dto, nameof(IQryxRequest<object>.AfterCursor), cursorResult.FirstValue);
+            SetFast(metadata, dto, nameof(IQryxRequest<object>.AfterCursor), cursorResult.FirstValue);
+        }
+    }
+
+    private static void SetFast(DtoMetadata metadata, object target, string propName, object? value)
+    {
+        if (metadata.StandardSetters.TryGetValue(propName, out var setter))
+        {
+            setter(target, value);
         }
     }
 

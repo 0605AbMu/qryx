@@ -24,6 +24,9 @@ public sealed class FilterPropertyMetadata
     /// <summary>Compiled fast getter: (dtoInstance) => propertyValue</summary>
     public required Func<object, object?> Getter { get; init; }
 
+    /// <summary>Compiled fast setter: (dtoInstance, value) => dtoInstance.Property = value</summary>
+    public Action<object, object?>? Setter { get; init; }
+
     public required bool IsCollection { get; init; }
     public Type? CollectionElementType { get; init; }
 }
