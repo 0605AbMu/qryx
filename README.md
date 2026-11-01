@@ -8,14 +8,15 @@ Qryx REST API so'rov parametrlarini to'g'ridan-to'g'ri xavfsiz, yuqori unumdorli
 
 ## 📦 Loyiha Arxitekturasi
 
-Loyiha toza arxitekturaga asoslangan 6 ta NuGet paketidan va namuna loyihasidan iborat:
+Loyiha toza arxitekturaga asoslangan 7 ta NuGet paketidan va namuna loyihasidan iborat:
 
 ```text
 src/
 ├── Qryx.Core/              # Interfeyslar, [Filter] atributi, Op enum, QryxList<T> (0 dependencies)
 ├── Qryx.Expressions/       # Expression Tree Builder, Compiled Delegate Cache, Reflection Inspector
-├── Qryx.EntityFramework/   # EF Core IQueryable extension'lar, ToPagedResultAsync, PagedResult<T>
-├── Qryx.AspNetCore/        # ModelBinder, Minimal API / Controller integratsiyasi, EndpointFilter
+├── Qryx.EntityFramework/   # EF Core IQueryable extension'lar, ToPagedResultAsync, ToPagedAsyncEnumerable, PagedResult<T>
+├── Qryx.AspNetCore/        # ModelBinder, Minimal API / Controller integratsiyasi, Fast Compiled Setters
+├── Qryx.SourceGenerator/   # Roslyn Incremental Source Generator (Compile-time code generation)
 ├── Qryx.OpenApi/           # Modern .NET 10 Microsoft.AspNetCore.OpenApi transformerlari
 └── Qryx.Swashbuckle/       # Classic Swashbuckle (SwaggerGen) IOperationFilter integratsiyasi
 benchmarks/
@@ -29,19 +30,23 @@ samples/
 ## 🚀 Asosiy Xususiyatlar
 
 1. **Parser-free & Type-safe**: Satrli so'rovlar (OData/GraphQL) parserlarisiz, to'liq C# kuchli tiplashtirilgan DTO shartnomalari.
-2. **Eng toza URL (Prefiks yondashuvi)**: `minAge=20&maxAge=35`, `fromDate=...&toDate=...` konvensiyasi bo'yicha oraliq filtrlar avtomatik moslashtiriladi.
-3. **Multi-Target & Indeks Do'stligi**: Hisoblangan yoki birlashgan maydonlar (masalan, `FullName`) bir nechta ustunga (`FirstName`, `LastName`) `Expression.OrElse` orqali tarjima qilinadi va B-Tree indekslarini buzmaydi.
-4. **Minimal Heap Allocation**: Reflection faqat birinchi so'rovda ishlaydi, qolgan so'rovlar kompilyatsiya qilingan delegatlar va keshdagi metadata orqali bajariladi.
-5. **DoS Guard**: `PageSize` maksimal 100 bilan cheklangan (`Math.Min(PageSize, 100)`).
-6. **SQL Injection Free**: Barcha parametrlar EF Core parametrlariga aylanadi (`@p0`, `@p1`).
-7. **Keyset / Cursor Pagination**: Katta hajmdagi ma'lumotlar uchun `AfterCursor` orqali tezkor sahifalash.
-8. **Ixcham va qulay JSON envelope**: API javobi faqat `items`, `total` va `hasNext` maydonlarini qaytaradi.
-9. **Classic Swashbuckle & Modern OpenAPI**: Classic Swagger UI (`Swashbuckle.AspNetCore`) va .NET 10 ning yangi OpenAPI kutubxonalari bilan to'liq integratsiya.
-10. **Database-Aware Invariant String Matching**: `StartsWith`, `EndsWith`, `Contains` biznes operatorlari uchun `Invariant = true` (standart) bo'lganda, PostgreSQL provayderida avtomatik ravishda native `ILIKE` ga kompilyatsiya qilinadi. Baza ustuniga `lower()` yoki `upper()` funksiyalari o'ralmasligi sababli PostgreSQL B-Tree indekslaridan to'liq foydalaniladi. Boshqa ma'lumotlar bazalarida esa xavfsiz `lower()` fallback ishlatiladi.
-11. **Single-Query Pagination (`IncludeTotalCount = false`)**: `COUNT(*)` so'rovini chetlab o'tib, bitta so'rovda `Take(pageSize + 1)` bilan `items` va `hasNext` ni aniqlaydi. Bazaga tushadigan yuklamani 50% ga qisqartiradi va javob qaytarish vaqtini 2.7x ga tezlashtiradi.
-12. **Zero-Reflection Hot-Path**: `PropertyChainCache` va `SortStepCache` orqali so'rov bajarilish vaqtida barcha reflection lookup'lar, generik metod chaqiruvlari va satr bo'linishlari (`.Split`) butunlay yo'q qilingan; saralash nanosoniyada ishlaydi.
-13. **Keyset Cursor Pagination & NextCursor**: `AfterCursor` orqali cheksiz o'lchamdagi katta jadvallarda $O(\log N)$ tezlikda indeksli sahifalash.
-14. **Ilg'or Operatorlar**: Full-Text Search (`Op.Fts`) va JSONB qidiruv (`Op.JsonContains`).
+2. **100% Database-Provider Independence**: Hech qanday ma'lumotlar bazasiga qattiq bog'lanmagan. PostgreSQL, SQL Server, SQLite, MySQL, MariaDB, Oracle va EF Core InMemory bilan bir xil kafolatlangan unumdorlikda ishlaydi.
+3. **Eng toza URL (Prefiks yondashuvi)**: `minAge=20&maxAge=35`, `fromDate=...&toDate=...` konvensiyasi bo'yicha oraliq filtrlar avtomatik moslashtiriladi.
+4. **Multi-Target & Indeks Do'stligi**: Hisoblangan yoki birlashgan maydonlar (masalan, `FullName`) bir nechta ustunga (`FirstName`, `LastName`) `Expression.OrElse` orqali tarjima qilinadi va B-Tree indekslarini buzmaydi.
+5. **Minimal Heap Allocation**: Reflection faqat birinchi so'rovda ishlaydi, qolgan so'rovlar kompilyatsiya qilingan delegatlar va keshdagi metadata orqali bajariladi.
+6. **DoS Guard**: `PageSize` maksimal 100 bilan cheklangan (`Math.Min(PageSize, 100)`).
+7. **SQL Injection Free**: Barcha parametrlar EF Core parametrlariga aylanadi (`@p0`, `@p1`).
+8. **Keyset / Cursor Pagination & NextCursor**: Katta hajmdagi ma'lumotlar uchun `AfterCursor` orqali tezkor $O(\log N)$ sahifalash.
+9. **Ixcham va qulay JSON envelope**: API javobi faqat `items`, `total` va `hasNext` maydonlarini qaytaradi.
+10. **Classic Swashbuckle & Modern OpenAPI**: Classic Swagger UI (`Swashbuckle.AspNetCore`) va .NET 10 ning yangi OpenAPI kutubxonalari bilan to'liq integratsiya.
+11. **Database-Aware Invariant String Matching**: `StartsWith`, `EndsWith`, `Contains` biznes operatorlari uchun `Invariant = true` (standart) bo'lganda, PostgreSQL provayderida avtomatik ravishda native `ILIKE` ga kompilyatsiya qilinadi. Baza ustuniga `lower()` yoki `upper()` funksiyalari o'ralmasligi sababli PostgreSQL B-Tree indekslaridan to'liq foydalaniladi. Boshqa ma'lumotlar bazalarida esa xavfsiz `lower()` fallback ishlatiladi.
+12. **Single-Query Pagination (`IncludeTotalCount = false`)**: `COUNT(*)` so'rovini chetlab o'tib, bitta so'rovda `Take(pageSize + 1)` bilan `items` va `hasNext` ni aniqlaydi. Bazaga tushadigan yuklamani 50% ga qisqartiradi va javob qaytarish vaqtini 2.8x ga tezlashtiradi.
+13. **Zero-Reflection Hot-Path**: `PropertyChainCache` va `SortStepCache` orqali so'rov bajarilish vaqtida barcha reflection lookup'lar, generik metod chaqiruvlari va satr bo'linishlari (`.Split`) butunlay yo'q qilingan; saralash nanosoniyada ishlaydi.
+14. **DB Observability (`TagWith`)**: Avtomatik ravishda har bir SQL ga `-- Qryx: DtoName` izohini qo'shadi, bu esa DBA larga sekin so'rovlarni tahlil qilishni osonlashtiradi.
+15. **Zero-Copy Streaming (`ToPagedAsyncEnumerable`)**: Katta hajmdagi ma'lumotlarni RAM ga yig'masdan to'g'ridan-to'g'ri `IAsyncEnumerable` sifatida HTTP response streamiga oqizish imkoniyati.
+16. **ModelBinding Fast Compiled Setters**: HTTP parametrlarini DTO ga bog'lashda `prop.SetValue` reflection o'rniga kompilyatsiya qilingan delegatlar ishlatiladi.
+17. **Roslyn Source Generator (`Qryx.SourceGenerator`)**: DTO larni kompilyatsiya vaqtida tahlil qilib, compile-time tezkor extension methodlarni generatsiya qiladi.
+18. **Ilg'or Operatorlar**: Full-Text Search (`Op.Fts`) va JSONB qidiruv (`Op.JsonContains`).
 
 ---
 
