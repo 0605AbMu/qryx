@@ -25,7 +25,7 @@ public static class QryxExtensions
 
         source = FilterBuilder.Apply(source, request);
         source = SortBuilder.Apply(source, request);
-        return source;
+        return source.TagWith($"Qryx: {request.GetType().Name}");
     }
 
     /// <summary>
@@ -218,5 +218,82 @@ public static class QryxExtensions
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    /// <summary>
+    /// Streams paged query results directly as IAsyncEnumerable for zero-copy memory performance.
+    /// Ideal for large exports, reports, or HTTP chunked streaming without buffering full collections in RAM.
+    /// Completely database-provider agnostic.
+    /// </summary>
+    public static IAsyncEnumerable<TEntity> ToPagedAsyncEnumerable<TEntity>(
+        this IQueryable<TEntity> source,
+        IQryxRequest<TEntity> request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var pageSize = PaginationBuilder.ClampPageSize(request.PageSize, QryxConstants.DefaultMaxPageSize);
+
+        if (request.AfterCursor != null)
+        {
+            var filtered = FilterBuilder.Apply(source, request);
+            var query = PaginationBuilder.ApplyKeyset(
+                filtered,
+                request.AfterCursor,
+                pageSize,
+                request.CursorProperty,
+                request.IsDescending);
+
+            return query.AsAsyncEnumerable();
+        }
+
+        var page = PaginationBuilder.ClampPage(request.Page);
+        var filteredQuery = source.ApplyQryx(request);
+
+        return filteredQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .AsAsyncEnumerable();
+    }
+
+    /// <summary>
+    /// Streams paged and projected query results directly as IAsyncEnumerable for zero-copy memory performance.
+    /// Pushes projection (selector) into SQL query to transfer only selected columns over network.
+    /// Completely database-provider agnostic.
+    /// </summary>
+    public static IAsyncEnumerable<TResult> ToPagedAsyncEnumerable<TEntity, TResult>(
+        this IQueryable<TEntity> source,
+        IQryxRequest<TEntity> request,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        var pageSize = PaginationBuilder.ClampPageSize(request.PageSize, QryxConstants.DefaultMaxPageSize);
+
+        if (request.AfterCursor != null)
+        {
+            var filtered = FilterBuilder.Apply(source, request);
+            var query = PaginationBuilder.ApplyKeyset(
+                filtered,
+                request.AfterCursor,
+                pageSize,
+                request.CursorProperty,
+                request.IsDescending);
+
+            return query.Select(selector).AsAsyncEnumerable();
+        }
+
+        var page = PaginationBuilder.ClampPage(request.Page);
+        var filteredQuery = source.ApplyQryx(request);
+
+        return filteredQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(selector)
+            .AsAsyncEnumerable();
     }
 }
