@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Qryx.SampleApi/Qryx.SampleApi.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Qryx.AspNetCore/Qryx.AspNetCore.csproj" />
+    <Project Path="src/Qryx.Core/Qryx.Core.csproj" />
+    <Project Path="src/Qryx.EntityFramework/Qryx.EntityFramework.csproj" />
+    <Project Path="src/Qryx.Expressions/Qryx.Expressions.csproj" />
+    <Project Path="src/Qryx.OpenApi/Qryx.OpenApi.csproj" />
+    <Project Path="src/Qryx.Swashbuckle/Qryx.Swashbuckle.csproj" />
+  </Folder>
+</Solution>
