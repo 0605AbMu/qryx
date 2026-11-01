@@ -144,18 +144,27 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
             sb.AppendLine($"            System.Linq.Expressions.Expression? body = null;");
             sb.AppendLine();
 
-            // Process properties with [Filter]
-            var properties = classSymbol.GetMembers().OfType<IPropertySymbol>();
-            foreach (var prop in properties)
+            // Process properties with [Filter] sorted by short-circuit operator priority
+            var filterProps = classSymbol.GetMembers().OfType<IPropertySymbol>()
+                .Select(p => new
+                {
+                    Prop = p,
+                    Attr = p.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name is "FilterAttribute" or "Filter")
+                })
+                .Where(x => x.Attr != null)
+                .Select(x => new
+                {
+                    x.Prop,
+                    x.Attr,
+                    Op = GetOperator(x.Attr!),
+                    TargetProps = GetTargetProperties(x.Prop, x.Attr!)
+                })
+                .OrderBy(x => GetOperatorPriority(x.Op, x.Prop))
+                .ToList();
+
+            foreach (var item in filterProps)
             {
-                var filterAttr = prop.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name is "FilterAttribute" or "Filter");
-                if (filterAttr == null)
-                    continue;
-
-                var op = GetOperator(filterAttr);
-                var targetProps = GetTargetProperties(prop, filterAttr);
-
-                GenerateFilterLogic(sb, prop, op, targetProps);
+                GenerateFilterLogic(sb, item.Prop, item.Op, item.TargetProps);
             }
 
             sb.AppendLine();
@@ -240,6 +249,23 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
             }
         }
         return 0; // Equals
+    }
+
+    private static int GetOperatorPriority(int op, IPropertySymbol prop)
+    {
+        return op switch
+        {
+            0 => prop.Type.SpecialType == SpecialType.System_String ? 2 : 1, // Equals
+            1 => 3, // NotEquals
+            2 or 3 or 4 or 5 => 4, // Greater/Less
+            9 => 5, // Between
+            10 => 10, // In
+            11 => 11, // NotIn
+            6 => 20, // StartsWith
+            7 => 21, // EndsWith
+            8 => 22, // Contains
+            _ => 50
+        };
     }
 
     private static List<string> GetTargetProperties(IPropertySymbol prop, AttributeData filterAttr)

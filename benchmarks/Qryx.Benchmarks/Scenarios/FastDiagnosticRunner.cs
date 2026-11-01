@@ -178,12 +178,17 @@ public static class FastDiagnosticRunner
         var odataTest = ((IQueryable<BenchmarkUser>)optTest.ApplyTo(db.Users.AsNoTracking())).ToList();
         Console.WriteLine($"      [Verification] Items returned: Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
 
-        // Warmup
-        for (int i = 0; i < 50; i++)
+        // Warmup all frameworks equally to ensure JIT & EF query compiler cache readiness
+        for (int i = 0; i < 20; i++)
         {
+            db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
             var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
             q = SortBuilder.Apply(q, qryxComplex);
             PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
+            db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
+            sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
+            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
+            ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
         }
 
         const int iterations = 5_000;
