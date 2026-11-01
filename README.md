@@ -4,6 +4,9 @@
 
 Qryx REST API so'rov parametrlarini to'g'ridan-to'g'ri xavfsiz, yuqori unumdorlikka ega va indekslarga mos Entity Framework Core `IQueryable` Expression Tree'lariga o'girib beruvchi zamonaviy dinamik so'rov dvigatelidir.
 
+> 📖 **Dasturchilar uchun to'liq qo'llanma, arxitekturaviy tavsiyalar va ishlab chiqarishdagi kritik nuqtalar**:  
+> [Dasturchilar uchun To'liq Qo'llanma (USAGE.md)](file:///Users/0605abmu/Desktop/work/qryx/docs/USAGE.md) faylida batafsil yoritilgan.
+
 ---
 
 ## 📦 Loyiha Arxitekturasi
