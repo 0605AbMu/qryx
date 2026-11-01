@@ -1,0 +1,179 @@
+using System.Collections;
+using System.Linq.Expressions;
+using Qryx.Core.Enums;
+using Qryx.Expressions.Metadata;
+
+namespace Qryx.Expressions.Builders;
+
+/// <summary>
+/// Builds Expression Trees from DTO metadata and applies them to IQueryable.
+/// </summary>
+public static class FilterBuilder
+{
+    /// <summary>
+    /// Applies declarative filter attributes from the DTO instance to the queryable.
+    /// </summary>
+    public static IQueryable<TEntity> Apply<TEntity>(IQueryable<TEntity> source, object request)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var predicate = BuildPredicate<TEntity>(request);
+        return predicate != null ? source.Where(predicate) : source;
+    }
+
+    /// <summary>
+    /// Builds a combined Expression&lt;Func&lt;TEntity, bool&gt;&gt; predicate from DTO filter metadata.
+    /// Returns null if no active filters are provided.
+    /// </summary>
+    public static Expression<Func<TEntity, bool>>? BuildPredicate<TEntity>(object request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var dtoMetadata = MetadataCache.GetDtoMetadata(request.GetType());
+        if (dtoMetadata.Filters.Count == 0)
+            return null;
+
+        var parameter = Expression.Parameter(typeof(TEntity), "x");
+        var expressions = new List<Expression>();
+
+        foreach (var filter in dtoMetadata.Filters)
+        {
+            var val = filter.Getter(request);
+            if (val == null)
+                continue;
+
+            if (val is string str && string.IsNullOrEmpty(str))
+                continue;
+
+            if (filter.IsCollection && val is IEnumerable enumerable)
+            {
+                var enumerator = enumerable.GetEnumerator();
+                using var disposable = enumerator as IDisposable;
+                if (!enumerator.MoveNext())
+                    continue;
+            }
+
+            Expression? filterCombinedExpr = null;
+            foreach (var path in filter.TargetPropertyPaths)
+            {
+                var pathExpr = BuildSingleValueExpressionForPath(parameter, path, filter, val);
+                if (pathExpr == null)
+                    continue;
+
+                filterCombinedExpr = filterCombinedExpr == null
+                    ? pathExpr
+                    : Expression.OrElse(filterCombinedExpr, pathExpr);
+            }
+
+            if (filterCombinedExpr != null)
+            {
+                expressions.Add(filterCombinedExpr);
+            }
+        }
+
+        if (expressions.Count == 0)
+            return null;
+
+        Expression combined = expressions[0];
+        for (int i = 1; i < expressions.Count; i++)
+        {
+            combined = Expression.AndAlso(combined, expressions[i]);
+        }
+
+        return Expression.Lambda<Func<TEntity, bool>>(combined, parameter);
+    }
+
+    private static Expression? BuildSingleValueExpressionForPath(
+        Expression parameter,
+        string targetPath,
+        FilterPropertyMetadata filter,
+        object val)
+    {
+        var targetMember = ExpressionHelper.BuildMemberAccess(parameter, targetPath);
+
+        switch (filter.Operator)
+        {
+            case Op.Equals:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.Equal(targetMember, constant);
+            }
+            case Op.NotEquals:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.NotEqual(targetMember, constant);
+            }
+            case Op.GreaterThan:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.GreaterThan(targetMember, constant);
+            }
+            case Op.GreaterThanOrEqual:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.GreaterThanOrEqual(targetMember, constant);
+            }
+            case Op.LessThan:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.LessThan(targetMember, constant);
+            }
+            case Op.LessThanOrEqual:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.LessThanOrEqual(targetMember, constant);
+            }
+            case Op.StartsWith:
+            {
+                var constant = Expression.Constant(val.ToString(), typeof(string));
+                return ExpressionHelper.BuildStartsWith(targetMember, constant, filter.CaseSensitive);
+            }
+            case Op.EndsWith:
+            {
+                var constant = Expression.Constant(val.ToString(), typeof(string));
+                return ExpressionHelper.BuildEndsWith(targetMember, constant, filter.CaseSensitive);
+            }
+            case Op.Contains:
+            {
+                var constant = Expression.Constant(val.ToString(), typeof(string));
+                return ExpressionHelper.BuildContains(targetMember, constant, filter.CaseSensitive);
+            }
+            case Op.In:
+            {
+                return ExpressionHelper.BuildInExpression(targetMember, val);
+            }
+            case Op.NotIn:
+            {
+                return Expression.Not(ExpressionHelper.BuildInExpression(targetMember, val));
+            }
+            case Op.Between:
+            {
+                var constant = ExpressionHelper.BuildConstantExpression(val, targetMember.Type);
+                return Expression.Equal(targetMember, constant);
+            }
+            case Op.IsNull:
+            {
+                if (val is bool b)
+                {
+                    return b
+                        ? Expression.Equal(targetMember, Expression.Constant(null, targetMember.Type))
+                        : Expression.NotEqual(targetMember, Expression.Constant(null, targetMember.Type));
+                }
+                return Expression.Equal(targetMember, Expression.Constant(null, targetMember.Type));
+            }
+            case Op.IsNotNull:
+            {
+                if (val is bool b)
+                {
+                    return b
+                        ? Expression.NotEqual(targetMember, Expression.Constant(null, targetMember.Type))
+                        : Expression.Equal(targetMember, Expression.Constant(null, targetMember.Type));
+                }
+                return Expression.NotEqual(targetMember, Expression.Constant(null, targetMember.Type));
+            }
+            default:
+                return null;
+        }
+    }
+}
