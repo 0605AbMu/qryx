@@ -39,3 +39,5 @@ public record StringUserBenchmarkDto : QryxRequest<BenchmarkUser>
     [Filter(nameof(BenchmarkUser.FirstName), Op.StartsWith)]
     public string? FirstName { get; init; }
 }
+
+public record UserSummaryDto(int Id, string FirstName, int Age, string Status);
