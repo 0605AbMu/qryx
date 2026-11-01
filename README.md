@@ -171,14 +171,14 @@ API Endpoint: `http://localhost:5000/api/users`
 
 To'liq benchmark loyihasi [Qryx.Benchmarks](file:///Users/0605abmu/Desktop/work/qryx/benchmarks/Qryx.Benchmarks) manzilida joylashgan bo'lib, har xil sharoitlardagi sinovlarni o'z ichiga oladi:
 
-| Ko'rsatkich / Sharoit | Qryx (Compiled AST) | Qryx (Source Gen) | Gridify | Sieve | OData |
+| Ko'rsatkich / Sharoit | Qryx (Source Gen) | Qryx (Dynamic AST) | Gridify | Sieve | OData |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **So'rov tuzish (Construction)** | **6.27 μs (4.0x tezroq)** | **14.55 μs (1.7x tezroq)** | 25.07 μs | 27.60 μs | 46.84 μs |
-| **Xotira sarfi (Allocated Heap)** | **3.8 KB (Eng kam!)** | **7.7 KB** | 25.4 KB (6.7x ko'p) | 23.7 KB (6.2x ko'p) | 43.9 KB (11.5x ko'p) |
-| **Real PostgreSQL DB (10k items)** | **639 μs (21.1 KB)** | 751 μs (36.5 KB) | 612 μs (46.5 KB) | 607 μs (50.4 KB) | 611 μs (67.7 KB) |
-| **Parallel yuklama (Concurrency)** | **1,270,000+ ops/s** (786 ns) | **761,000+ ops/s** (1.31 μs) | ~205,000 ops/s (6.2x sekin) | ~88,000 ops/s (14.4x sekin) | ~77,000 ops/s (16.4x sekin) |
-| **Single-Query Sahifalash (Postgres)** | **238 μs (3.25x tezroq)** | - | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
-| **Zero-Copy Stream (IAsyncEnumerable)** | **243 μs (3.19x tezroq)** | - | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
+| **So'rov tuzish (Construction)** | **8.03 μs (Eng tez!)** | 11.46 μs | 23.49 μs (2.9x sekin) | 24.69 μs (3.1x sekin) | 40.79 μs (5.1x sekin) |
+| **Xotira sarfi (Allocated Heap)** | **3.3 KB (Rekord darajada kam!)** | **3.8 KB** | 25.2 KB (7.6x ko'p) | 23.5 KB (7.1x ko'p) | 43.7 KB (13.2x ko'p) |
+| **Real PostgreSQL DB (10k items)** | **626 μs (24.7 KB)** | 695 μs (25.2 KB) | 588 μs (46.2 KB) | 613 μs (49.8 KB) | 627 μs (67.7 KB) |
+| **Parallel yuklama (Concurrency)** | **1,449,000+ ops/s (690 ns)** | **1,138,000+ ops/s** (878 ns) | ~210,000 ops/s (6.9x sekin) | ~95,000 ops/s (15.1x sekin) | ~91,000 ops/s (15.8x sekin) |
+| **Single-Query Sahifalash (Postgres)** | - | **238 μs (3.05x tezroq)** | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
+| **Zero-Copy Stream (IAsyncEnumerable)** | - | **249 μs (2.92x tezroq)** | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi | Qo'llab-quvvatlamaydi |
 
 Benchmarklarni ishga tushirish:
 ```bash

@@ -85,6 +85,13 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
         sb.AppendLine("{");
         sb.AppendLine("    public static class QryxGeneratedExtensions");
         sb.AppendLine("    {");
+        sb.AppendLine("        private static readonly System.Reflection.MethodInfo StartsWithMethod =");
+        sb.AppendLine("            typeof(string).GetMethod(nameof(string.StartsWith), new[] { typeof(string) })!;");
+        sb.AppendLine("        private static readonly System.Reflection.MethodInfo EndsWithMethod =");
+        sb.AppendLine("            typeof(string).GetMethod(nameof(string.EndsWith), new[] { typeof(string) })!;");
+        sb.AppendLine("        private static readonly System.Reflection.MethodInfo ContainsMethod =");
+        sb.AppendLine("            typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;");
+        sb.AppendLine();
 
         foreach (var classSymbol in distinctClasses)
         {
@@ -133,6 +140,9 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
             sb.AppendLine($"        {{");
             sb.AppendLine($"            if (request == null) return query;");
             sb.AppendLine();
+            sb.AppendLine($"            var p = System.Linq.Expressions.Expression.Parameter(typeof({typeParam}), \"x\");");
+            sb.AppendLine($"            System.Linq.Expressions.Expression? body = null;");
+            sb.AppendLine();
 
             // Process properties with [Filter]
             var properties = classSymbol.GetMembers().OfType<IPropertySymbol>();
@@ -147,6 +157,12 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
 
                 GenerateFilterLogic(sb, prop, op, targetProps);
             }
+
+            sb.AppendLine();
+            sb.AppendLine($"            if (body != null)");
+            sb.AppendLine($"            {{");
+            sb.AppendLine($"                query = query.Where(System.Linq.Expressions.Expression.Lambda<System.Func<{typeParam}, bool>>(body, p));");
+            sb.AppendLine($"            }}");
 
             // Generate sorting and pagination
             sb.AppendLine();
@@ -293,71 +309,94 @@ public class QryxIncrementalGenerator : IIncrementalGenerator
 
         sb.AppendLine($"            if ({checkCondition})");
         sb.AppendLine($"            {{");
-        sb.AppendLine($"                var val = {valAccess};");
 
         if (targetProps.Count == 1)
         {
             var target = targetProps[0];
+            string mem = BuildMemberAccessString("p", target);
+            sb.AppendLine($"                var mem = {mem};");
+            sb.AppendLine($"                var val = System.Linq.Expressions.Expression.Constant({valAccess}, mem.Type);");
+
             switch (op)
             {
                 case 0: // Equals
-                    sb.AppendLine($"                query = query.Where(x => x.{target} == val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.Equal(mem, val);");
                     break;
                 case 1: // NotEquals
-                    sb.AppendLine($"                query = query.Where(x => x.{target} != val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.NotEqual(mem, val);");
                     break;
                 case 2: // GreaterThan
-                    sb.AppendLine($"                query = query.Where(x => x.{target} > val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.GreaterThan(mem, val);");
                     break;
                 case 3: // GreaterThanOrEqual
-                    sb.AppendLine($"                query = query.Where(x => x.{target} >= val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.GreaterThanOrEqual(mem, val);");
                     break;
                 case 4: // LessThan
-                    sb.AppendLine($"                query = query.Where(x => x.{target} < val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.LessThan(mem, val);");
                     break;
                 case 5: // LessThanOrEqual
-                    sb.AppendLine($"                query = query.Where(x => x.{target} <= val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.LessThanOrEqual(mem, val);");
                     break;
                 case 6: // StartsWith
-                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.StartsWith(val));");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.Call(mem, StartsWithMethod, val);");
                     break;
                 case 7: // EndsWith
-                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.EndsWith(val));");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.Call(mem, EndsWithMethod, val);");
                     break;
                 case 8: // Contains
-                    sb.AppendLine($"                query = query.Where(x => x.{target} != null && x.{target}.Contains(val));");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.Call(mem, ContainsMethod, val);");
                     break;
                 default:
-                    sb.AppendLine($"                query = query.Where(x => x.{target} == val);");
+                    sb.AppendLine($"                var cond = System.Linq.Expressions.Expression.Equal(mem, val);");
                     break;
             }
+
+            sb.AppendLine($"                body = body == null ? cond : System.Linq.Expressions.Expression.AndAlso(body, cond);");
         }
         else if (targetProps.Count > 1)
         {
-            // Multi-target (e.g. FirstName, LastName)
-            var conditions = new List<string>();
-            foreach (var t in targetProps)
+            sb.AppendLine($"                var val = System.Linq.Expressions.Expression.Constant({valAccess});");
+            sb.AppendLine($"                System.Linq.Expressions.Expression? multiCond = null;");
+            for (int i = 0; i < targetProps.Count; i++)
             {
+                var t = targetProps[i];
+                string mem = BuildMemberAccessString("p", t);
+                string condVar = $"c{i}";
                 switch (op)
                 {
                     case 6: // StartsWith
-                        conditions.Add($"(x.{t} != null && x.{t}.StartsWith(val))");
+                        sb.AppendLine($"                var {condVar} = System.Linq.Expressions.Expression.Call({mem}, StartsWithMethod, val);");
                         break;
                     case 7: // EndsWith
-                        conditions.Add($"(x.{t} != null && x.{t}.EndsWith(val))");
+                        sb.AppendLine($"                var {condVar} = System.Linq.Expressions.Expression.Call({mem}, EndsWithMethod, val);");
                         break;
                     case 8: // Contains
-                        conditions.Add($"(x.{t} != null && x.{t}.Contains(val))");
+                        sb.AppendLine($"                var {condVar} = System.Linq.Expressions.Expression.Call({mem}, ContainsMethod, val);");
                         break;
                     default:
-                        conditions.Add($"x.{t} == val");
+                        sb.AppendLine($"                var {condVar} = System.Linq.Expressions.Expression.Equal({mem}, val);");
                         break;
                 }
+                sb.AppendLine($"                multiCond = multiCond == null ? (System.Linq.Expressions.Expression){condVar} : System.Linq.Expressions.Expression.OrElse(multiCond, {condVar});");
             }
-            var combinedCondition = string.Join(" || ", conditions);
-            sb.AppendLine($"                query = query.Where(x => {combinedCondition});");
+            sb.AppendLine($"                if (multiCond != null) body = body == null ? multiCond : System.Linq.Expressions.Expression.AndAlso(body, multiCond);");
         }
 
         sb.AppendLine($"            }}");
+    }
+
+    private static string BuildMemberAccessString(string parameterName, string targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath)) return parameterName;
+        if (!targetPath.Contains("."))
+            return $"System.Linq.Expressions.Expression.Property({parameterName}, \"{targetPath}\")";
+
+        var parts = targetPath.Split('.');
+        var current = parameterName;
+        foreach (var part in parts)
+        {
+            current = $"System.Linq.Expressions.Expression.Property({current}, \"{part}\")";
+        }
+        return current;
     }
 }
