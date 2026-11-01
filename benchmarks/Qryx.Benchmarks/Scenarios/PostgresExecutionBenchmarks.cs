@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Qryx.Benchmarks.Models;
 using Qryx.Benchmarks.Services;
+using Qryx.EntityFramework.Extensions;
+using Qryx.EntityFramework.Models;
 using Qryx.Expressions.Builders;
 using Sieve.Models;
 
@@ -21,6 +23,8 @@ public class PostgresExecutionBenchmarks
 
     // Qryx DTO
     private UserBenchmarkDto _qryxComplexDto = null!;
+    private UserBenchmarkDto _qryxSingleQueryDto = null!;
+    private UserBenchmarkDto _qryxCursorDto = null!;
 
     // Gridify query
     private GridifyQuery _gridifyComplexQuery = null!;
@@ -54,6 +58,29 @@ public class PostgresExecutionBenchmarks
             IsDescending = true,
             Page = 2,
             PageSize = 20
+        };
+
+        _qryxSingleQueryDto = new UserBenchmarkDto
+        {
+            MinAge = 25,
+            MaxAge = 40,
+            Status = "Active",
+            FullName = "Ali",
+            SortBy = nameof(BenchmarkUser.CreatedAt),
+            IsDescending = true,
+            Page = 2,
+            PageSize = 20,
+            IncludeTotalCount = false
+        };
+
+        _qryxCursorDto = new UserBenchmarkDto
+        {
+            MinAge = 25,
+            MaxAge = 40,
+            Status = "Active",
+            FullName = "Ali",
+            PageSize = 20,
+            AfterCursor = "2000"
         };
 
         _gridifyComplexQuery = new GridifyQuery
@@ -109,5 +136,17 @@ public class PostgresExecutionBenchmarks
     {
         var options = BenchmarkDataHelper.CreateODataOptions(_odataContext, _odataServiceProvider, ODataComplexQuery);
         return ((IQueryable<BenchmarkUser>)options.ApplyTo(_db.Users.AsNoTracking())).ToList();
+    }
+
+    [Benchmark(Description = "Qryx (Single-Query No Count)")]
+    public PagedResult<BenchmarkUser> Qryx_SingleQueryExecute()
+    {
+        return _db.Users.AsNoTracking().ToPagedResultAsync(_qryxSingleQueryDto).GetAwaiter().GetResult();
+    }
+
+    [Benchmark(Description = "Qryx (Keyset Cursor Index Seek)")]
+    public PagedResult<BenchmarkUser> Qryx_KeysetCursorExecute()
+    {
+        return _db.Users.AsNoTracking().ToPagedResultAsync(_qryxCursorDto).GetAwaiter().GetResult();
     }
 }

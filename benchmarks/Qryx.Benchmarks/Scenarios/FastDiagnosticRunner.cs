@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Qryx.Benchmarks.Models;
 using Qryx.Benchmarks.Services;
+using Qryx.EntityFramework.Extensions;
 using Qryx.Expressions.Builders;
 using Sieve.Models;
 
@@ -24,6 +25,7 @@ public static class FastDiagnosticRunner
         RunExecutionSuite();
         RunPostgresExecutionSuite();
         RunConcurrencyStressSuite();
+        RunPaginationStrategiesSuite();
     }
 
     public static void RunConstructionSuite()
@@ -375,6 +377,91 @@ public static class FastDiagnosticRunner
         });
 
         PrintResultsTable([qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+    }
+
+    public static void RunPaginationStrategiesSuite()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n[5/5] BENCHMARK: PostgreSQL Pagination Strategies (Docker localhost:5432, 500 iters)");
+        Console.WriteLine("      (Measures impact of Single-Query, Keyset Cursor, and Zero-Copy Streaming vs Standard)");
+        Console.ResetColor();
+
+        using var db = new PostgresBenchmarkDbContext();
+
+        var standardDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            Page = 2,
+            PageSize = 20,
+            IncludeTotalCount = true
+        };
+
+        var singleQueryDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            Page = 2,
+            PageSize = 20,
+            IncludeTotalCount = false
+        };
+
+        var cursorDto = new UserBenchmarkDto
+        {
+            Status = "Active",
+            MinAge = 25,
+            MaxAge = 40,
+            PageSize = 20,
+            AfterCursor = "2000"
+        };
+
+        // Warmup
+        for (int i = 0; i < 10; i++)
+        {
+            db.Users.AsNoTracking().ToPagedResultAsync(standardDto).GetAwaiter().GetResult();
+            db.Users.AsNoTracking().ToPagedResultAsync(singleQueryDto).GetAwaiter().GetResult();
+            db.Users.AsNoTracking().ToPagedResultAsync(cursorDto).GetAwaiter().GetResult();
+        }
+
+        const int iterations = 500;
+
+        var standardMetric = MeasureMetric("Standard (Count + Data, 2 DB queries)", iterations, () =>
+        {
+            return db.Users.AsNoTracking().ToPagedResultAsync(standardDto).GetAwaiter().GetResult();
+        });
+
+        var singleQueryMetric = MeasureMetric("Single-Query (No Count, 1 DB query)", iterations, () =>
+        {
+            return db.Users.AsNoTracking().ToPagedResultAsync(singleQueryDto).GetAwaiter().GetResult();
+        });
+
+        var cursorMetric = MeasureMetric("Keyset Cursor (Index Seek, 1 DB query)", iterations, () =>
+        {
+            return db.Users.AsNoTracking().ToPagedResultAsync(cursorDto).GetAwaiter().GetResult();
+        });
+
+        var streamMetric = MeasureMetric("Zero-Copy Stream (IAsyncEnumerable, 1 query)", iterations, () =>
+        {
+            var stream = db.Users.AsNoTracking().ToPagedAsyncEnumerable(singleQueryDto);
+            var count = 0;
+            var enumerator = stream.GetAsyncEnumerator();
+            try
+            {
+                while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+                {
+                    count++;
+                }
+            }
+            finally
+            {
+                enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            return count;
+        });
+
+        PrintResultsTable([standardMetric, singleQueryMetric, cursorMetric, streamMetric]);
     }
 
     private static BenchmarkMetric MeasureMetric(string name, int iterations, Func<object> action)
