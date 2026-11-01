@@ -11,6 +11,11 @@ public class Program
 
         if (args.Contains("--postgres") || args.Contains("--pg"))
         {
+            if (args.Contains("--diag"))
+            {
+                PostgresDiagnostic.RunDiagnostic();
+                return;
+            }
             FastDiagnosticRunner.RunPostgresExecutionSuite();
             return;
         }
