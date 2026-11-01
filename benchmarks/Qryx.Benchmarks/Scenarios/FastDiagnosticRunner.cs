@@ -171,12 +171,13 @@ public static class FastDiagnosticRunner
 
         const string odataComplex = "?$filter=Age ge 25 and Age le 40 and Status eq 'Active' and (startswith(FirstName, 'Ali') or startswith(LastName, 'Ali'))&$orderby=CreatedAt desc&$skip=20&$top=20";
 
+        var qryxSourceGenTest = db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
         var qryxTest = PaginationBuilder.ApplyOffset(SortBuilder.Apply(FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex), qryxComplex), qryxComplex).ToList();
         var gridifyTest = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy!).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
         var sieveTest = sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
         var optTest = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
         var odataTest = ((IQueryable<BenchmarkUser>)optTest.ApplyTo(db.Users.AsNoTracking())).ToList();
-        Console.WriteLine($"      [Verification] Items returned: Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
+        Console.WriteLine($"      [Verification] Items returned: Qryx(SourceGen)={qryxSourceGenTest.Count}, Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
 
         // Warmup all frameworks equally to ensure JIT & EF query compiler cache readiness
         for (int i = 0; i < 20; i++)
@@ -223,7 +224,7 @@ public static class FastDiagnosticRunner
             return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
         });
 
-        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        PrintResultsTable([qryxMetric, qryxSourceGenMetric, gridifyMetric, sieveMetric, odataMetric]);
     }
 
     public static void RunPostgresExecutionSuite()
@@ -292,12 +293,13 @@ public static class FastDiagnosticRunner
             AfterCursor = "2000"
         };
 
+        var qryxSourceGenTest = db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
         var qryxTest = PaginationBuilder.ApplyOffset(SortBuilder.Apply(FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex), qryxComplex), qryxComplex).ToList();
         var gridifyTest = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy!).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
         var sieveTest = sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
         var optTest = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
         var odataTest = ((IQueryable<BenchmarkUser>)optTest.ApplyTo(db.Users.AsNoTracking())).ToList();
-        Console.WriteLine($"      [Postgres Verification] Items returned: Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
+        Console.WriteLine($"      [Postgres Verification] Items returned: Qryx(SourceGen)={qryxSourceGenTest.Count}, Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
 
         // Warmup connection pool
         for (int i = 0; i < 20; i++)
