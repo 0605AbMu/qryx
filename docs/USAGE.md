@@ -13,21 +13,23 @@
    - [3.1. Tenglik va Solishtirish (`Equals`, `GreaterThan`, `LessThan`)](#31-tenglik-va-solishtirish)
    - [3.2. Avtomatik Prefikslar (`Min`, `Max`, `From`, `To`)](#32-avtomatik-prefikslar)
    - [3.3. To'plamlar va Massivlar (`In`, `NotIn`)](#33-toplamlar-va-massivlar)
-   - [3.4. Matnli Qidiruv va Invariantlik (`StartsWith`, `Contains`)](#34-matnli-qidiruv-va-invariantlik)
+   - [3.4. Matnli Qidiruv va Invariantlik (`StartsWith`, `Contains`, `EndsWith`)](#34-matnli-qidiruv-va-invariantlik-startswith-contains-endswith)
    - [3.5. Multi-Target (Kompozit/Hisoblangan maydonlar)](#35-multi-target-kompozithisoblangan-maydonlar)
    - [3.6. Bog'langan Jadvallar (Navigation Properties)](#36-boglangan-jadvallar-navigation-properties)
    - [3.7. Ilg'or Operatorlar: Full-Text Search (FTS) va JSONB](#37-ilgor-operatorlar-full-text-search-fts-va-jsonb)
-4. [Sahifalash (Pagination) Strategiyalari](#4-sahifalash-pagination-strategiyalari)
+4. [Sahifalash (Pagination) va Saralash (Sorting) Strategiyalari](#4-sahifalash-pagination-strategiyalari)
    - [4.1. Standart Sahifalash (Offset + Count)](#41-standart-sahifalash-offset--count)
    - [4.2. Single-Query Sahifalash (`IncludeTotalCount = false`)](#42-single-query-sahifalash-includetotalcount--false)
    - [4.3. Keyset / Cursor Sahifalash (`AfterCursor`)](#43-keyset--cursor-sahifalash-aftercursor)
    - [4.4. Zero-Copy Streaming (`ToPagedAsyncEnumerable`)](#44-zero-copy-streaming-topagedasyncenumerable)
+   - [4.5. Ko'p Ustunli Saralash (Multi-Column Sorting)](#45-kop-ustunli-saralash-multi-column-sorting)
 5. [Projection Pushdown (Optimizatsiya)](#5-projection-pushdown-optimizatsiya)
 6. [Roslyn Incremental Source Generator Rejimi](#6-roslyn-incremental-source-generator-rejimi)
 7. [API Integratsiyasi (Minimal API & Controller)](#7-api-integratsiyasi-minimal-api--controller)
-8. [Swagger & OpenAPI Hujjatlashtirish](#8-swagger--openapi-hujjatlashtirish)
+8. [Swagger & OpenAPI Hujjatlashtirish va Sample API](#8-swagger--openapi-hujjatlashtirish)
 9. [🚨 KRITIK NUQTALAR VA XATOLARNING OLDINI OLISH](#9--kritik-nuqtalar-va-xatolarning-oldini-olish)
 10. [Ma'lumotlar Bazasi Indekslash Retseptlari (DB Recipes)](#10-malumotlar-bazasi-indekslash-retseptlari-db-recipes)
+11. [Qryx vs Gridify vs Sieve vs OData (Benchmark Xulosalari)](#11--qryx-vs-gridify-vs-sieve-vs-odata-benchmark-xulosalari)
 
 ---
 
@@ -182,18 +184,28 @@ public record UserBatchDto : QryxRequest<User>
 }
 ```
 
-### 3.4. Matnli Qidiruv va Invariantlik (`StartsWith`, `Contains`)
-Qryx `StartsWith`, `EndsWith` va `Contains` operatorlariga ega:
+### 3.4. Matnli Qidiruv va Invariantlik (`StartsWith`, `Contains`, `EndsWith`)
+Qryx `StartsWith`, `EndsWith` va `Contains` operatorlariga ega. Ma'lumotlar bazasi B-Tree indekslaridan maksimal foydalanish uchun Qryx provayderga xos aqlli optimizatsiyani amalga oshiradi:
+
 ```csharp
 public record CustomerFilterDto : QryxRequest<Customer>
 {
-    // Invariant = true (Standart qiymat)
-    // PostgreSQL'da to'g'ridan-to'g'ri ILIKE 'val%' ga aylanadi (B-Tree indeks ishlaydi!)
-    // SQL Server va SQLite'da standart case-insensitive collation orqali ishlaydi.
-    [Filter(Op.StartsWith, Invariant = true)]
+    // 1. Invariant = false (Standart qiymat) -> Direct LIKE
+    // PostgreSQL, SQL Server, Oracle va SQLite'da to'g'ridan-to'g'ri:
+    // WHERE x."CompanyName" LIKE 'Tech%'
+    // Hech qanday lower() yoki upper() o'ralmaydi, B-Tree indeksi to'liq ishlaydi!
+    [Filter(Op.StartsWith)]
     public string? CompanyName { get; init; }
 
-    // Katta-kichik harfni qat'iy ajratish talab qilinsa:
+    // 2. Invariant = true (Case-insensitive qidiruv)
+    // A) PostgreSQL da: to'g'ridan-to'g'ri native ILIKE ga aylanadi:
+    //    WHERE x."Email" ILIKE 'ali%' (B-Tree varchar_pattern_ops indeksi ishlaydi!)
+    // B) SQL Server, SQLite, Oracle da: yuqori unumdorlikka ega UPPER():
+    //    WHERE UPPER(x."Email") LIKE UPPER('ali%')
+    [Filter(Op.StartsWith, Invariant = true)]
+    public string? Email { get; init; }
+
+    // Katta-kichik harfni ajratuvchi qat'iy substring qidiruvi:
     [Filter(Op.Contains, Invariant = false)]
     public string? ExactCode { get; init; }
 }
@@ -307,6 +319,23 @@ app.MapGet("/api/export/users", (
 });
 ```
 
+### 4.5. Ko'p Ustunli Saralash (Multi-Column Sorting)
+Qryx bir nechta ustunlar bo'yicha bir vaqtning o'zida tartiblashni (Multi-sort) to'liq qo'llab-quvvatlaydi. So'rov satrida quyidagi ikkala sintaksis ham avtomatik tushuniladi:
+
+1. **Vergul bilan ajratilgan yagona parametr**:
+   ```http
+   GET /api/users?sortBy=CreatedAt desc, Age asc
+   ```
+2. **Takroriy parametrlar**:
+   ```http
+   GET /api/users?sortBy=CreatedAt desc&sortBy=Age asc
+   ```
+
+**Qanday ishlaydi?**
+* Qryx'ning `SortBuilder` dvigateli so'rovni avtomatik ravishda `OrderBy`, `ThenBy`, `ThenByDescending` zanjiriga aylantiradi.
+* **Kesh bilan optimallashgan**: `ClauseCache` va `SortStepCache` orqali saralash qadamlari oldindan kompilyatsiya qilingan delegatlar yordamida bajariladi (har so'rovda yangidan parsing qilinmaydi).
+* **Xavfsizlik kafolati**: Har bir saralanayotgan ustun qat'iy ravishda `[Sortable]` atributi tekshiruvidan o'tadi.
+
 ---
 
 ## 5. Projection Pushdown (Optimizatsiya)
@@ -315,14 +344,14 @@ Jadvalda 30 ta ustun (jumladan `Bio`, `AvatarBlob`, `AuditLog`) bo'lsa-yu, API f
 
 Qryx `ToPagedResultAsync` da to'g'ridan-to'g'ri selector (projection) qabul qiladi:
 ```csharp
-public record UserSummaryDto(int Id, string FullName, string Status);
+public record UserSummaryDto(Guid Id, string FullName, string Status);
 
 var result = await db.Users
     .AsNoTracking()
     .ToPagedResultAsync(
         request: query,
         selector: u => new UserSummaryDto(u.Id, u.FirstName + " " + u.LastName, u.Status),
-        cancellationToken: ct
+        ct: ct
     );
 ```
 > [!IMPORTANT]
@@ -361,7 +390,8 @@ app.MapGet("/api/fast-users", async (
     return Results.Ok(users);
 });
 ```
-- **Unumdorlik**: Query Construction vaqti **8.03 μs**, ko'p oqimli parallel ishlashda **690 nanosoniya** (1,440,000+ ops/s)!
+- **Unumdorlik**: Query Construction vaqti **6.99 μs - 8.34 μs**, ko'p oqimli parallel ishlashda **825 nanosoniya** (1,210,000+ ops/s, 0 Bayt xotira sarfi)!
+- **Nol Reflection Kafolati**: Barcha `PropertyInfo` va ifoda bog'lamlari sinf yuklanganda bir marta `static readonly` qilinadi, so'rov paytida runtime string reflection (`Type.GetProperty`) 0 marta chaqiriladi.
 
 ---
 
@@ -422,6 +452,15 @@ Swagger UI brauzerda:
 - Barcha `min*`, `max*` filtrlarini to'g'ri tiplari (integer, string, datetime) bilan ko'rsatadi.
 - Saralash uchun `sortBy` ustunlari va `isDescending` boolean selektorini beradi.
 - Sahifalash `page`, `pageSize`, `afterCursor` parametrlarini hujjatlashtiradi.
+
+### 💡 Namuna Loyiha (Sample API)
+To'liq ishlovchi namuna [`samples/Qryx.SampleApi`](file:///Users/0605abmu/Desktop/work/qryx/samples/Qryx.SampleApi) loyihasida joylashgan. Unda quyidagi barcha real endpointlar Swagger orqali sinab ko'rish uchun tayyorlangan:
+* `GET /api/users` — Standart dynamic filtrlash va multi-sort (`?sortBy=createdAt desc,age asc`)
+* `GET /api/users/cursor` — Keyset / cursor pagination (`?afterCursor=...&pageSize=20`)
+* `GET /api/users/fast` — Single-query pagination (`IncludeTotalCount = false`, 3x tezroq)
+* `GET /api/users/projection` — Projection pushdown (SQL darajasida faqat kerakli ustunlarni yuklash)
+* `GET /api/users/stream` — Zero-copy streaming (`IAsyncEnumerable`)
+* `GET /api/users/generated` — Roslyn Source Generator (`ApplyGenerated(query)`)
 
 ---
 
@@ -544,6 +583,22 @@ INCLUDE (FirstName, LastName, Status);
 CREATE NONCLUSTERED INDEX IX_Users_Names 
 ON Users (FirstName, LastName);
 ```
+
+---
+
+## 11. 📊 Qryx vs Gridify vs Sieve vs OData (Benchmark Xulosalari)
+
+To'liq sinovlar .NET 10 muhitida real PostgreSQL (Docker 10,000 yozuv) va InMemory ma'lumotlar to'plamida o'tkazildi:
+
+| Test Sharoiti | Qryx Natijasi | Gridify | Sieve | OData | Qryx Ustunligi |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **AST / So'rov Tuzish** | **6.99 μs** (Source Gen) | 24.68 μs | 29.52 μs | 43.24 μs | **3.5x tezroq** (8x kam xotira) |
+| **EF Core InMemory** | **382.63 μs** | 405.23 μs | 860.25 μs | 691.71 μs | **Eng yuqori unumdorlik** |
+| **Real PostgreSQL DB** | **434.92 μs** (Keyset) / **555 μs** | 614.49 μs | 637.25 μs | 645.87 μs | **41% tezroq** (2.3x kam xotira) |
+| **100K Parallel Concurrency** | **825.1 ns** (0 B/op) | 4.63 μs | 10.61 μs | 12.10 μs | **5.6x tezroq** (0 Bayt allocation!) |
+| **Keyset Cursor Pagination** | **257.39 μs** | — | — | — | Standartdan **3x tezroq** ($O(\log N)$) |
+
+*Batafsil test hisobotlari bilan [benchmark_results.md](file:///Users/0605abmu/.gemini/antigravity/brain/346f75ee-fd98-407c-98e6-ba68fb275ca7/benchmark_results.md) faylida tanishishingiz mumkin.*
 
 ---
 

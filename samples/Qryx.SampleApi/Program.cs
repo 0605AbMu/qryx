@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Qryx.AspNetCore.Extensions;
 using Qryx.EntityFramework.Extensions;
+using Qryx.Generated;
 using Qryx.SampleApi.Models;
 using Qryx.Swashbuckle.Extensions;
 
@@ -85,7 +86,10 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Minimal API Endpoint
+// =========================================================================
+// 1. Standart Dynamic API (Offset + Count + Multi-Sort)
+// Example: GET /api/users?status=Active&minAge=20&sortBy=createdAt desc,age asc
+// =========================================================================
 app.MapGet("/api/users", async (
     [AsParameters] UserQueryDto query,
     AppDbContext db,
@@ -98,6 +102,86 @@ app.MapGet("/api/users", async (
         .ToPagedResultAsync(query, ct);
 
     return Results.Ok(result);
+}).WithQryx();
+
+// =========================================================================
+// 2. Keyset / Cursor Pagination (O(log N) Index Seek)
+// Example: GET /api/users/cursor?afterCursor=2000&pageSize=20
+// =========================================================================
+app.MapGet("/api/users/cursor", async (
+    [AsParameters] UserQueryDto query,
+    AppDbContext db,
+    CancellationToken ct) =>
+{
+    var result = await db.Users
+        .AsNoTracking()
+        .ToPagedResultAsync(query, ct);
+
+    return Results.Ok(result);
+}).WithQryx();
+
+// =========================================================================
+// 3. Single-Query Pagination (IncludeTotalCount = false, 3x Tezroq)
+// Example: GET /api/users/fast?status=Active&page=1&pageSize=20
+// =========================================================================
+app.MapGet("/api/users/fast", async (
+    [AsParameters] FastUserQueryDto query,
+    AppDbContext db,
+    CancellationToken ct) =>
+{
+    var result = await db.Users
+        .AsNoTracking()
+        .ToPagedResultAsync(query, ct);
+
+    return Results.Ok(result);
+}).WithQryx();
+
+// =========================================================================
+// 4. Projection Pushdown (Faqat kerakli ustunlarni SQL darajasida tanlash)
+// Example: GET /api/users/projection?status=Active
+// =========================================================================
+app.MapGet("/api/users/projection", async (
+    [AsParameters] UserQueryDto query,
+    AppDbContext db,
+    CancellationToken ct) =>
+{
+    var result = await db.Users
+        .AsNoTracking()
+        .ToPagedResultAsync(
+            request: query,
+            selector: u => new UserSummaryDto(u.Id, u.FirstName, u.LastName, u.Age, u.Status, u.Department.Name),
+            ct: ct
+        );
+
+    return Results.Ok(result);
+}).WithQryx();
+
+// =========================================================================
+// 5. Zero-Copy Streaming (IAsyncEnumerable, RAM'da buffer qilmasdan HTTP stream)
+// Example: GET /api/users/stream?status=Active
+// =========================================================================
+app.MapGet("/api/users/stream", (
+    [AsParameters] UserQueryDto query,
+    AppDbContext db) =>
+{
+    return Results.Ok(db.Users.AsNoTracking().ToPagedAsyncEnumerable(query));
+}).WithQryx();
+
+// =========================================================================
+// 6. Roslyn Source Generator (Kompilyatsiya vaqtida generatsiya qilingan LINQ)
+// Example: GET /api/users/generated?minAge=20&maxAge=40
+// =========================================================================
+app.MapGet("/api/users/generated", async (
+    [AsParameters] UserQueryDto query,
+    AppDbContext db,
+    CancellationToken ct) =>
+{
+    var users = await db.Users
+        .AsNoTracking()
+        .ApplyGenerated(query) // 0.00 ns runtime reflection!
+        .ToListAsync(ct);
+
+    return Results.Ok(users);
 }).WithQryx();
 
 app.Run();

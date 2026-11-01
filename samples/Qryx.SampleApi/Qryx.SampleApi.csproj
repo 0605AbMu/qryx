@@ -7,6 +7,9 @@
     <ProjectReference Include="..\..\src\Qryx.Expressions\Qryx.Expressions.csproj" />
     <ProjectReference Include="..\..\src\Qryx.OpenApi\Qryx.OpenApi.csproj" />
     <ProjectReference Include="..\..\src\Qryx.Swashbuckle\Qryx.Swashbuckle.csproj" />
+    <ProjectReference Include="..\..\src\Qryx.SourceGenerator\Qryx.SourceGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
