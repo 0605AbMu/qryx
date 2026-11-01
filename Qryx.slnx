@@ -11,6 +11,7 @@
     <Project Path="src/Qryx.EntityFramework/Qryx.EntityFramework.csproj" />
     <Project Path="src/Qryx.Expressions/Qryx.Expressions.csproj" />
     <Project Path="src/Qryx.OpenApi/Qryx.OpenApi.csproj" />
+    <Project Path="src/Qryx.SourceGenerator/Qryx.SourceGenerator.csproj" />
     <Project Path="src/Qryx.Swashbuckle/Qryx.Swashbuckle.csproj" />
   </Folder>
 </Solution>
