@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/0605AbMu/qryx/security/advisories/new
+    about: Please report vulnerabilities privately, not in public issues.
+  - name: 📖 Developer guide
+    url: https://github.com/0605AbMu/qryx/blob/master/docs/USAGE.md
+    about: Operators, URL reference, pagination strategies and production pitfalls.

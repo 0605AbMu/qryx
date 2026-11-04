@@ -1,6 +1,6 @@
 # 📖 Qryx: Dasturchilar uchun To'liq Qo'llanma (Developer Usage Guide)
 
-> **Parser-free, DTO-Centric, Strongly-Typed Dynamic Query Engine for .NET 10 / C# 14**  
+> **Parser-free, DTO-Centric, Strongly-Typed Dynamic Query Engine for .NET 8 and .NET 10**  
 > Ushbu qo'llanmada Qryx ekotizimidan professional loyihalarda foydalanish, barcha 7 ta NuGet paketining imkoniyatlari, eng optimal arxitekturaviy patternlar va eng asosiysi — **ishlab chiqarish (production) muhitidagi kritik nuqtalar** batafsil tushuntirilgan.
 
 ---

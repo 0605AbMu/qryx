@@ -1,82 +1,98 @@
 # Qryx (`/krɪks/`)
 
-**Parser-free, DTO-Centric, Strongly-Typed Dynamic Query Engine for .NET 10 / C# 14**
+**English** | [O'zbekcha](https://github.com/0605AbMu/qryx/blob/master/README.uz.md)
 
-Qryx REST API so'rov parametrlarini to'g'ridan-to'g'ri xavfsiz, yuqori unumdorlikka ega va indekslarga mos Entity Framework Core `IQueryable` Expression Tree'lariga o'girib beruvchi zamonaviy dinamik so'rov dvigatelidir.
+[![NuGet](https://img.shields.io/nuget/v/Qryx.AspNetCore.svg?label=NuGet)](https://www.nuget.org/packages/Qryx.AspNetCore/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/0605AbMu/qryx/blob/master/LICENSE)
+[![.NET 8 | 10](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4.svg)](https://dotnet.microsoft.com/)
 
-> 📖 **Dasturchilar uchun to'liq qo'llanma, arxitekturaviy tavsiyalar va ishlab chiqarishdagi kritik nuqtalar**:  
-> [Dasturchilar uchun To'liq Qo'llanma (USAGE.md)](docs/USAGE.md) faylida batafsil yoritilgan.
+**Parser-free, DTO-centric, strongly-typed dynamic query engine for .NET 8 and .NET 10**
+
+Qryx turns REST query strings directly into safe, parameterized, index-friendly Entity Framework Core `IQueryable` expression trees. You describe filters on a plain C# DTO; Qryx binds the query string, filters, sorts and pages, and returns a compact response.
+
+> 📖 **Full developer guide** (architecture, every operator with URL examples, pagination strategies, production pitfalls, database recipes):
+> [docs/USAGE.md](https://github.com/0605AbMu/qryx/blob/master/docs/USAGE.md) — currently in Uzbek.
 
 ---
 
-## 📦 Loyiha Arxitekturasi
+## 📦 Architecture
 
-Loyiha toza arxitekturaga asoslangan 7 ta NuGet paketidan va namuna loyihasidan iborat:
+Qryx is split into 7 NuGet packages plus a sample and a benchmark suite:
 
 ```text
 src/
-├── Qryx.Core/              # Interfeyslar, [Filter] atributi, Op enum, QryxList<T> (0 dependencies)
-├── Qryx.Expressions/       # Expression Tree Builder, Compiled Delegate Cache, Reflection Inspector
-├── Qryx.EntityFramework/   # EF Core IQueryable extension'lar, ToPagedResultAsync, ToPagedAsyncEnumerable, PagedResult<T>
-├── Qryx.AspNetCore/        # ModelBinder, Minimal API / Controller integratsiyasi, Fast Compiled Setters
-├── Qryx.SourceGenerator/   # Roslyn Incremental Source Generator (Compile-time code generation)
-├── Qryx.OpenApi/           # Modern .NET 10 Microsoft.AspNetCore.OpenApi transformerlari
-└── Qryx.Swashbuckle/       # Classic Swashbuckle (SwaggerGen) IOperationFilter integratsiyasi
+├── Qryx.Core/              # Contracts, [Filter]/[Sortable]/[NoTotal], Op, Range<T>, QryxList<T> (0 dependencies)
+├── Qryx.Expressions/       # Expression tree builder, parameterized SQL, sort plans, keyset cursors, caches
+├── Qryx.EntityFramework/   # EF Core extensions: ToPagedResultAsync, ToPagedAsyncEnumerable, PagedResult<T>
+├── Qryx.AspNetCore/        # Model binding, Minimal API / MVC integration, HTTP 400 mapping
+├── Qryx.SourceGenerator/   # Roslyn incremental source generator (compile-time plans and diagnostics)
+├── Qryx.OpenApi/           # .NET 10 Microsoft.AspNetCore.OpenApi transformers
+└── Qryx.Swashbuckle/       # Classic Swashbuckle (SwaggerGen) filters
 benchmarks/
-└── Qryx.Benchmarks/        # BenchmarkDotNet & High-speed diagnostic suite (Gridify vs Sieve vs OData vs Qryx)
+└── Qryx.Benchmarks/        # BenchmarkDotNet and fast diagnostic suite (Qryx vs Gridify vs Sieve vs OData)
 samples/
-└── Qryx.SampleApi/         # Minimal API + EF Core InMemory + Classic Swashbuckle namunasi
+└── Qryx.SampleApi/         # Minimal API + EF Core InMemory + Swashbuckle sample
 ```
 
-### NuGet Paketlari
+### NuGet packages
 
-| Paket | Versiya | Vazifasi |
+| Package | Version | Purpose |
 | :--- | :--- | :--- |
-| [Qryx.Core](https://www.nuget.org/packages/Qryx.Core/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Core.svg)](https://www.nuget.org/packages/Qryx.Core/) | DTO shartnomalari: `QryxRequest<T>`, `[Filter]`, `[Sortable]`, `[NoTotal]`, `Op`, `Range<T>`, `QryxList<T>`, `QryxRequestException` |
-| [Qryx.Expressions](https://www.nuget.org/packages/Qryx.Expressions/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Expressions.svg)](https://www.nuget.org/packages/Qryx.Expressions/) | Expression tree dvigateli (filtr, saralash, sahifalash) |
+| [Qryx.Core](https://www.nuget.org/packages/Qryx.Core/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Core.svg)](https://www.nuget.org/packages/Qryx.Core/) | DTO contracts: `QryxRequest<T>`, `[Filter]`, `[Sortable]`, `[NoTotal]`, `Op`, `Range<T>`, `QryxList<T>`, `QryxRequestException` |
+| [Qryx.Expressions](https://www.nuget.org/packages/Qryx.Expressions/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Expressions.svg)](https://www.nuget.org/packages/Qryx.Expressions/) | Expression tree engine (filtering, sorting, paging) |
 | [Qryx.EntityFramework](https://www.nuget.org/packages/Qryx.EntityFramework/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.EntityFramework.svg)](https://www.nuget.org/packages/Qryx.EntityFramework/) | `ToPagedResultAsync`, `ToPagedAsyncEnumerable`, `ApplyQryx`, `PagedResult<T>`, keyset |
 | [Qryx.AspNetCore](https://www.nuget.org/packages/Qryx.AspNetCore/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.AspNetCore.svg)](https://www.nuget.org/packages/Qryx.AspNetCore/) | `AddQryx()`, `.WithQryx()`, MVC binder, HTTP 400 mapping |
-| [Qryx.SourceGenerator](https://www.nuget.org/packages/Qryx.SourceGenerator/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.SourceGenerator.svg)](https://www.nuget.org/packages/Qryx.SourceGenerator/) | `ApplyGenerated(dto)`, `QRYX001`/`QRYX002` diagnostikalari |
-| [Qryx.OpenApi](https://www.nuget.org/packages/Qryx.OpenApi/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.OpenApi.svg)](https://www.nuget.org/packages/Qryx.OpenApi/) | .NET 10 `Microsoft.AspNetCore.OpenApi` transformerlari (`AddQryxTransformers()`) |
-| [Qryx.Swashbuckle](https://www.nuget.org/packages/Qryx.Swashbuckle/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Swashbuckle.svg)](https://www.nuget.org/packages/Qryx.Swashbuckle/) | Classic Swashbuckle (SwaggerGen) filtrlari (`AddQryxFilters()`) |
+| [Qryx.SourceGenerator](https://www.nuget.org/packages/Qryx.SourceGenerator/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.SourceGenerator.svg)](https://www.nuget.org/packages/Qryx.SourceGenerator/) | `ApplyGenerated(dto)`, `QRYX001`/`QRYX002` diagnostics |
+| [Qryx.OpenApi](https://www.nuget.org/packages/Qryx.OpenApi/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.OpenApi.svg)](https://www.nuget.org/packages/Qryx.OpenApi/) | .NET 10 `Microsoft.AspNetCore.OpenApi` transformers (`AddQryxTransformers()`) |
+| [Qryx.Swashbuckle](https://www.nuget.org/packages/Qryx.Swashbuckle/) | [![NuGet](https://img.shields.io/nuget/v/Qryx.Swashbuckle.svg)](https://www.nuget.org/packages/Qryx.Swashbuckle/) | Classic Swashbuckle (SwaggerGen) filters (`AddQryxFilters()`) |
 
-Odatiy Web API uchun o'rnatish:
+Typical Web API installation:
 ```bash
 dotnet add package Qryx.AspNetCore
 dotnet add package Qryx.EntityFramework
-# Ixtiyoriy: Swagger hujjatlari uchun Qryx.Swashbuckle (yoki Qryx.OpenApi), kompilyatsiya diagnostikalari uchun Qryx.SourceGenerator
+# Optional: Qryx.Swashbuckle (or Qryx.OpenApi) for API docs, Qryx.SourceGenerator for compile-time diagnostics
 ```
-`Qryx.AspNetCore` va `Qryx.EntityFramework` o'zlari `Qryx.Core` va `Qryx.Expressions` ni bog'liqlik sifatida olib keladi. DTO'lar alohida (domain/application) loyihada joylashgan bo'lsa, u yerga faqat `Qryx.Core` yetarli. `Qryx.SourceGenerator` esa bog'liqlik olib kelmaydi (analyzer), shuning uchun uni `Qryx.EntityFramework` bilan birga o'rnating.
+`Qryx.AspNetCore` and `Qryx.EntityFramework` bring `Qryx.Core` and `Qryx.Expressions` as dependencies. If your DTOs live in a separate (domain/application) project, `Qryx.Core` alone is enough there. `Qryx.SourceGenerator` is an analyzer and brings no dependencies, so install it together with `Qryx.EntityFramework`.
+
+### Supported frameworks
+
+| Package | .NET 8 (EF Core 8) | .NET 10 (EF Core 10) |
+| :--- | :---: | :---: |
+| `Qryx.Core`, `Qryx.Expressions`, `Qryx.EntityFramework`, `Qryx.AspNetCore`, `Qryx.Swashbuckle` | ✅ | ✅ |
+| `Qryx.SourceGenerator` (`netstandard2.0` analyzer) | ✅ | ✅ |
+| `Qryx.OpenApi` | ❌ use `Qryx.Swashbuckle` | ✅ |
+
+`Qryx.OpenApi` builds on the document transformers of `Microsoft.AspNetCore.OpenApi`, which exist from .NET 9, so it targets .NET 10 only. Behavior is identical on both runtimes, and the whole test suite runs on each. Microsoft support for .NET 8 and EF Core 8 ends on **November 10, 2026**, so plan to move to .NET 10 for continued security updates.
 
 ---
 
-## 🚀 Asosiy Xususiyatlar
+## 🚀 Features
 
-1. **Parser-free & Type-safe**: Satrli so'rovlar (OData/GraphQL) parserlarisiz, to'liq C# kuchli tiplashtirilgan DTO shartnomalari.
-2. **Database-Provider Independence**: Hech qanday ma'lumotlar bazasiga qattiq bog'lanmagan: standart LINQ ifodalarini hosil qiladi, shuning uchun istalgan EF Core provayderi (PostgreSQL, SQL Server, SQLite, MySQL, Oracle, InMemory) bilan ishlaydi. PostgreSQL (Npgsql) avtomatik aniqlanadi va native `ILIKE`, FTS, jsonb tarjimalari ishlatiladi; boshqa provayderlarda standart fallback ishlaydi. Testlar va benchmarklar PostgreSQL va EF InMemory'da o'tkazilgan.
-3. **Eng toza URL (Prefiks yondashuvi)**: `minAge=20&maxAge=35`, `fromDate=...&toDate=...` konvensiyasi bo'yicha oraliq filtrlar avtomatik moslashtiriladi.
-4. **Multi-Target & Indeks Do'stligi**: Hisoblangan yoki birlashgan maydonlar (masalan, `FullName`) bir nechta ustunga (`FirstName`, `LastName`) `Expression.OrElse` orqali tarjima qilinadi va B-Tree indekslarini buzmaydi.
-5. **Minimal Heap Allocation**: Reflection faqat birinchi so'rovda ishlaydi, qolgan so'rovlar kompilyatsiya qilingan delegatlar va keshdagi metadata orqali bajariladi.
-6. **DoS Guard**: `PageSize` maksimal 100 gacha jimgina cheklanadi (`QryxOptions.MaxPageSize`). OFFSET maksimal 10,000 (`QryxOptions.MaxOffset`, chuqurroq sahifalar uchun keyset) va `In` ro'yxati 1,000 qiymat bilan cheklangan, ortig'i 400 bilan rad etiladi. `sortBy` 256 belgi / 5 ustun bilan cheklangan: ortig'i e'tiborsiz qoldiriladi (`ThrowOnInvalidSortProperty = true` bo'lsa 400).
-7. **SQL Injection Free & Plan Cache Friendly**: Barcha filtr va cursor qiymatlari SQL parametrlariga aylanadi (`@p`), literal emas. EF Core so'rovni qayta kompilyatsiya qilmaydi, baza bitta plan saqlaydi.
-8. **Keyset / Cursor Pagination**: har bir sahifa (offset ham) `nextCursor` qaytaradi; uni `?afterCursor=` ga berib, chuqurlikdan qat'i nazar $O(\log N)$ tezlikda davom etiladi. Cursor `sortBy` (+ PK tie-breaker) dan hosil bo'ladi, aralash yo'nalishlar qo'llab-quvvatlanadi, bir xil qiymatli qatorlar tushib qolmaydi.
-9. **Ixcham JSON envelope**: `{ "items", "hasNext", "nextCursor"?, "total"? }`. `nextCursor` keyingi sahifa bo'lganda, `total` esa faqat `?includeTotal=true` bo'lganda qaytadi.
-10. **Classic Swashbuckle & Modern OpenAPI**: Classic Swagger UI (`Swashbuckle.AspNetCore`) va .NET 10 ning yangi OpenAPI kutubxonalari bilan to'liq integratsiya.
-11. **Database-Aware Invariant String Matching**: `StartsWith`, `EndsWith`, `Contains` biznes operatorlari uchun `Invariant = true` bo'lganda (standart: `false`, ya'ni to'g'ridan-to'g'ri `LIKE`), PostgreSQL provayderida native `ILIKE ... ESCAPE '\'` ga kompilyatsiya qilinadi (foydalanuvchi kiritgan `%`, `_` escape qilinadi). Boshqa ma'lumotlar bazalarida `UPPER()` fallback ishlatiladi.
-12. **Bitta so'rovli sahifalash (standart)**: `Take(pageSize + 1)` bilan `items`, `hasNext` va `nextCursor` bitta SQL so'rovda olinadi, `COUNT(*)` faqat `?includeTotal=true` bo'lganda bajariladi (katta jadvallarda `[NoTotal]` uni butunlay o'chiradi). Count + Data rejimidan 2.3x tezroq.
-13. **Zero-Reflection Hot-Path**: `PropertyChainCache`, `ClauseCache` va `SortStepCache` keshlari tufayli takroriy so'rovlarda reflection lookup'lar, generik metod yasash va `sortBy` ni qayta parsing qilish bajarilmaydi (ular faqat birinchi uchrashuvda ishlaydi).
-14. **DB Observability (`TagWith`, ixtiyoriy)**: `QryxOptions.EnableQueryTagging = true` (statik, standart `false`) bo'lsa, har bir SQL ga `-- Qryx: DtoName` izohini qo'shadi, bu esa DBA larga sekin so'rovlarni tahlil qilishni osonlashtiradi.
-15. **Zero-Copy Streaming (`ToPagedAsyncEnumerable`)**: Bitta sahifani RAM ga `List<T>` qilib yig'masdan to'g'ridan-to'g'ri `IAsyncEnumerable` sifatida HTTP response streamiga oqizish imkoniyati (`pageSize` baribir `MaxPageSize` bilan cheklanadi; sahifasiz eksport uchun `ApplyQryx(query).AsAsyncEnumerable()`).
-16. **ModelBinding Fast Compiled Setters**: HTTP parametrlarini DTO ga bog'lashda `prop.SetValue` reflection o'rniga kompilyatsiya qilingan delegatlar ishlatiladi.
-17. **Roslyn Source Generator (`Qryx.SourceGenerator`)**: DTO larni kompilyatsiya vaqtida tahlil qilib, har bir DTO uchun oldindan qurilgan, parametrli typed so'rov rejasini (`query.ApplyGenerated(dto)`) generatsiya qiladi; noto'g'ri konfiguratsiya `QRYX001`/`QRYX002` diagnostikalari bilan kompilyatsiyada aniqlanadi.
-18. **Ilg'or Operatorlar**: Full-Text Search (`Op.Fts` -> PostgreSQL `websearch_to_tsquery`), JSONB qidiruv (`Op.JsonContains` -> `@>` / `?`) va oraliq filtri (`Op.Between` + `Range<T>`, `?age=20..35`).
-19. **Klient xatolari = HTTP 400**: noto'g'ri qiymat, buzilgan yoki boshqa `sortBy` uchun yaratilgan cursor, `MaxOffset` dan chuqur `page`, 1,000 dan ortiq `In` qiymati va (`ThrowOnInvalidSortProperty = true` bo'lsa) ruxsatsiz sort ustuni `QryxRequestException` -> `ValidationProblemDetails` (Minimal API: `.WithQryx()`, MVC: `AddQryx()`).
+1. **Parser-free & type-safe**: no string query language (OData/GraphQL style) to parse; filters are strongly-typed C# DTO contracts.
+2. **Database-provider independent**: produces standard LINQ expressions, so it works with any EF Core provider (PostgreSQL, SQL Server, SQLite, MySQL, Oracle, InMemory). PostgreSQL (Npgsql) is detected automatically and gets native `ILIKE`, full-text search and jsonb translations; other providers use standard fallbacks. Tests and benchmarks run on PostgreSQL and EF InMemory.
+3. **Clean URLs (prefix convention)**: `minAge=20&maxAge=35`, `fromDate=...&toDate=...` map to range filters automatically.
+4. **Multi-target & index friendly**: computed fields (e.g. `FullName`) map to several columns (`FirstName`, `LastName`) with `Expression.OrElse`, keeping B-tree indexes usable.
+5. **Minimal heap allocation**: reflection runs only on first use; later requests use compiled delegates and cached metadata.
+6. **DoS guards**: `PageSize` is silently clamped to 100 (`QryxOptions.MaxPageSize`). OFFSET is limited to 10,000 (`QryxOptions.MaxOffset`; use keyset for deeper pages) and `In` lists to 1,000 values; anything beyond returns 400. `sortBy` is limited to 256 characters / 5 columns; extra clauses are ignored (400 with `ThrowOnInvalidSortProperty = true`).
+7. **SQL-injection free & plan-cache friendly**: every filter and cursor value becomes a SQL parameter (`@p`), never a literal. EF Core does not recompile the query and the database keeps one plan.
+8. **Keyset / cursor pagination**: every page (offset pages too) returns `nextCursor`; pass it to `?afterCursor=` to continue at $O(\log N)$ regardless of depth. The cursor is derived from `sortBy` (+ primary-key tie-breaker), supports mixed directions, and never skips rows with equal values.
+9. **Compact JSON envelope**: `{ "items", "hasNext", "nextCursor"?, "total"? }`. `nextCursor` is present when a next page exists, `total` only with `?includeTotal=true`.
+10. **Classic Swashbuckle & modern OpenAPI**: full integration with Swagger UI (`Swashbuckle.AspNetCore`) and .NET 10 OpenAPI; every Qryx parameter is documented as optional with the correct schema.
+11. **Database-aware case-insensitive matching**: with `Invariant = true` (default `false`, i.e. plain `LIKE`), `StartsWith`, `EndsWith` and `Contains` compile to native `ILIKE ... ESCAPE '\'` on PostgreSQL (user-supplied `%` and `_` are escaped). Other databases use an `UPPER()` fallback.
+12. **One query per page (default)**: `Take(pageSize + 1)` yields `items`, `hasNext` and `nextCursor` in a single SQL statement; `COUNT(*)` runs only with `?includeTotal=true` (and never for `[NoTotal]` DTOs on huge tables). 2.3x faster than count + data.
+13. **Zero-reflection hot path**: `PropertyChainCache`, `ClauseCache` and `SortStepCache` remove reflection lookups, generic method construction and `sortBy` re-parsing from repeated requests (they run on first encounter only).
+14. **DB observability (`TagWith`, optional)**: with `QryxOptions.EnableQueryTagging = true` (static, default `false`) every SQL statement gets a `-- Qryx: DtoName` comment, which helps DBAs analyze slow queries.
+15. **Zero-copy streaming (`ToPagedAsyncEnumerable`)**: streams one page as `IAsyncEnumerable` straight to the HTTP response without buffering a `List<T>` (`pageSize` is still capped by `MaxPageSize`; for an unpaged export use `ApplyQryx(query).AsAsyncEnumerable()`).
+16. **Fast compiled setters in model binding**: query parameters are bound with compiled delegates instead of `PropertyInfo.SetValue`.
+17. **Roslyn source generator (`Qryx.SourceGenerator`)**: analyzes DTOs at compile time and generates a pre-built, parameterized query plan per DTO (`query.ApplyGenerated(dto)`); misconfiguration is reported at compile time as `QRYX001`/`QRYX002`.
+18. **Advanced operators**: full-text search (`Op.Fts` → PostgreSQL `websearch_to_tsquery`), jsonb search (`Op.JsonContains` → `@>` / `?`) and range filters (`Op.Between` + `Range<T>`, `?age=20..35`).
+19. **Client errors are HTTP 400**: invalid values, tampered cursors or cursors created for another `sortBy`, pages deeper than `MaxOffset`, more than 1,000 `In` values and (with `ThrowOnInvalidSortProperty = true`) disallowed sort columns raise `QryxRequestException`, returned as `ValidationProblemDetails` (Minimal API: `.WithQryx()`, MVC: `AddQryx()`).
 
 ---
 
-## 💻 Tez Boshlash (Quick Start)
+## 💻 Quick start
 
-### 1. DTO E'lon Qilish
+### 1. Declare a DTO
 
 ```csharp
 using Qryx.Core.Attributes;
@@ -85,22 +101,22 @@ using Qryx.Core.Enums;
 
 public record UserQueryDto : QryxRequest<User>
 {
-    // 1. Prefiks yondashuvi (Eng toza URL: ?minAge=20&maxAge=35)
-    // Avtomatik ravishda User.Age ustuniga moslashadi
+    // 1. Prefix convention (clean URL: ?minAge=20&maxAge=35)
+    // Mapped to the User.Age column
     [Filter(nameof(User.Age), Op.GreaterThanOrEqual)]
     public int? MinAge { get; init; }
 
     [Filter(nameof(User.Age), Op.LessThanOrEqual)]
     public int? MaxAge { get; init; }
 
-    // 2. Enum yoki massiv filtri (?status=Active&status=Pending)
+    // 2. Enum / array filter (?status=Active&status=Pending)
     [Filter(Op.In)]
     public UserStatus[]? Status { get; init; }
 
-    // 3. Hisoblangan maydon (FullName): Qaysi Entity ustunlariga tushishi ko'rsatiladi
-    // Bu yerda DB indeksi buzilmasligi uchun ikkala ustunga OR bilan ulanadi.
-    // Invariant = true: PostgreSQL'da to'g'ridan-to'g'ri ILIKE ga aylanadi (lower()/upper() chaqirmaydi),
-    // boshqa ma'lumotlar bazalarida esa UPPER(ustun) LIKE @p fallback ishlatiladi.
+    // 3. Computed field (FullName): the entity columns it maps to are listed explicitly.
+    // Both columns are combined with OR so database indexes stay usable.
+    // Invariant = true: native ILIKE on PostgreSQL (no lower()/upper() around the column),
+    // UPPER(column) LIKE @p fallback on other databases.
     [Filter(Op.StartsWith, TargetProperties = [nameof(User.FirstName), nameof(User.LastName)], Invariant = true)]
     public string? FullName { get; init; }
 
@@ -110,7 +126,7 @@ public record UserQueryDto : QryxRequest<User>
 }
 ```
 
-### 2. Minimal API Integratsiyasi
+### 2. Minimal API integration
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -123,7 +139,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(opt => opt.UseSqlServer(...));
 builder.Services.AddQryx();
 
-// Classic Swashbuckle integratsiyasi
+// Classic Swashbuckle integration
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -150,15 +166,15 @@ app.MapGet("/api/users", async (
 app.Run();
 ```
 
-### 3. HTTP So'rov va Javob Namunasi
+### 3. HTTP request and response
 
-**So'rov:**
+**Request:**
 ```http
 GET /api/users?fullName=Ali&minAge=20&maxAge=35&status=Active&departmentName=Sales&sortBy=CreatedAt&isDescending=true&page=1&pageSize=10
 ```
-`sortBy=CreatedAt` ishlashi uchun `User.CreatedAt` (yoki DTO xossasi) `[Sortable]` bilan belgilangan bo'lishi kerak, aks holda u e'tiborsiz qoldiriladi.
+`sortBy=CreatedAt` only works when `User.CreatedAt` (or a DTO property) is marked `[Sortable]`; otherwise it is ignored.
 
-**Javob:**
+**Response:**
 ```json
 {
   "items": [
@@ -173,60 +189,76 @@ GET /api/users?fullName=Ali&minAge=20&maxAge=35&status=Active&departmentName=Sal
   "hasNext": false
 }
 ```
-`total` faqat `?includeTotal=true` bo'lganda qaytadi. Keyingi sahifa mavjud bo'lsa, javobda `"nextCursor"` ham bo'ladi: uni xuddi o'sha `sortBy` bilan `?afterCursor=` ga bering. Enum'lar javobda nom sifatida chiqishi uchun JSON'da `JsonStringEnumConverter` sozlangan deb hisoblangan (aks holda `"status": 0`).
+`total` is returned only with `?includeTotal=true`. When a next page exists, the response also contains `"nextCursor"`: pass it to `?afterCursor=` together with the same `sortBy`. Enums appear as names because `JsonStringEnumConverter` is assumed to be configured (otherwise `"status": 0`).
 
 ---
 
-## 🛠 Loyihani Qurish va Ishga Tushirish
+## 🛠 Build and run
 
 ```bash
-# Barcha loyihalarni kompilyatsiya qilish
+# Build everything
 dotnet build Qryx.slnx
 
-# Sample API'ni ishga tushirish
+# Run all tests
+dotnet test Qryx.slnx
+
+# Run the sample API
 dotnet run --project samples/Qryx.SampleApi/Qryx.SampleApi.csproj
 ```
 
-Swagger UI brauzerda: `http://localhost:5052/swagger`
-API Endpoint: `http://localhost:5052/api/users`
-(port `samples/Qryx.SampleApi/Properties/launchSettings.json` dagi `http` profilidan olinadi)
+Swagger UI: `http://localhost:5052/swagger`
+API endpoint: `http://localhost:5052/api/users`
+(the port comes from the `http` profile in `samples/Qryx.SampleApi/Properties/launchSettings.json`)
 
 ---
 
-## ⚡ Performance Benchmark (Qryx vs Gridify vs Sieve vs OData)
+## ⚡ Performance benchmark (Qryx vs Gridify vs Sieve vs OData)
 
-To'liq benchmark loyihasi [Qryx.Benchmarks](benchmarks/Qryx.Benchmarks) manzilida joylashgan. Natijalar `--fast` diagnostik runner'idan olingan (.NET 10, Release, PostgreSQL 17 Docker, 10,000 qator). Barcha frameworklar bir xil filtrni bajaradi: runner har bir framework tanlagan ID to'plamlarini solishtirib, buni tekshiradi. Ko'rsatilgan qiymat — navbatma-navbat o'tkazilgan 5–7 raundning medianasi; raundlar tartibi har safar almashtiriladi.
+The full benchmark project lives in [benchmarks/Qryx.Benchmarks](https://github.com/0605AbMu/qryx/tree/master/benchmarks/Qryx.Benchmarks). The numbers come from the `--fast` diagnostic runner (.NET 10, Release, PostgreSQL 17 in Docker, 10,000 rows). All frameworks run the same filter: the runner compares the ID sets each framework selects before timing anything. Each value is the median of 5–7 interleaved rounds whose order rotates every round.
 
-| Ko'rsatkich / Sharoit | Qryx (Source Gen) | Qryx (Dynamic) | Gridify | Sieve | OData |
+| Metric / scenario | Qryx (Source Gen) | Qryx (Dynamic) | Gridify | Sieve | OData |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **So'rov tuzish (Construction)** | **2.71 μs / 3.1 KB** | **2.80 μs / 3.1 KB** | 13.47 μs / 25.3 KB (5x sekin) | 18.84 μs / 23.8 KB (7x) | 29.95 μs / 44.3 KB (11x) |
-| **Parallel yuklama (Concurrency)** | **613 ns (1.63M ops/s)** | **628 ns (1.59M ops/s)** | 3.13 μs (5x sekin) | 7.72 μs (12x) | 6.94 μs (11x) |
-| **Real PostgreSQL, bir xil qiymatlar** | 774 μs / 29 KB | **747 μs / 29 KB** | 762 μs / 45 KB | 845 μs / 50 KB | 838 μs / 70 KB |
-| **Real PostgreSQL, har so'rovda yangi qiymat** | — | **760 μs** | 3.19 ms (**4.2x sekin**) | 914 μs | 878 μs |
-| **EF InMemory, bir xil qiymatlar** ¹ | 539 μs | 531 μs | **360 μs** | 834 μs | 707 μs |
-| **EF InMemory, har so'rovda yangi qiymat** | — | **581 μs** | 3.78 ms (6.5x sekin) | 802 μs | 821 μs |
+| **Query construction** | **2.71 μs / 3.1 KB** | **2.80 μs / 3.1 KB** | 13.47 μs / 25.3 KB (5x slower) | 18.84 μs / 23.8 KB (7x) | 29.95 μs / 44.3 KB (11x) |
+| **Concurrency (Parallel.For)** | **613 ns (1.63M ops/s)** | **628 ns (1.59M ops/s)** | 3.13 μs (5x slower) | 7.72 μs (12x) | 6.94 μs (11x) |
+| **Real PostgreSQL, same values** | 774 μs / 29 KB | **747 μs / 29 KB** | 762 μs / 45 KB | 845 μs / 50 KB | 838 μs / 70 KB |
+| **Real PostgreSQL, new values per request** | — | **760 μs** | 3.19 ms (**4.2x slower**) | 914 μs | 878 μs |
+| **EF InMemory, same values** ¹ | 539 μs | 531 μs | **360 μs** | 834 μs | 707 μs |
+| **EF InMemory, new values per request** | — | **581 μs** | 3.78 ms (6.5x slower) | 802 μs | 821 μs |
 
-**Sahifalash strategiyalari (PostgreSQL):** Count + Data 1.16 ms · Single-Query 514 μs (2.3x tezroq) · Keyset Cursor 488 μs (2.4x tezroq) · Zero-Copy Stream 511 μs.
+**Pagination strategies (PostgreSQL):** count + data 1.16 ms · single query 514 μs (2.3x faster) · keyset cursor 488 μs (2.4x faster) · zero-copy stream 511 μs.
 
-**Npgsql Auto Prepare** (`Max Auto Prepare=50;Auto Prepare Min Usages=2` ulanish satrida, kod o'zgarmaydi): Qryx **10–15% tezlashadi**, chunki uning parametrli SQL matni o'zgarmaydi va PostgreSQL tayyor planni qayta ishlatadi. Gridify'da natija −2–3%, qiymatlar o'zgarganda esa foyda yo'q, chunki literal SQL har safar boshqacha bo'ladi. Batafsil ma'lumot [USAGE.md 10-bo'limida](docs/USAGE.md#10-malumotlar-bazasi-indekslash-retseptlari-db-recipes).
+**Npgsql Auto Prepare** (`Max Auto Prepare=50;Auto Prepare Min Usages=2` in the connection string, no code change): Qryx gets **10–15% faster** because its parameterized SQL text never changes and PostgreSQL reuses the prepared plan. Gridify gains 2–3%, and nothing when values change, because its literal SQL differs every time.
 
-¹ EF InMemory provayderi so'rov parametrlarini har bir qator uchun qayta o'qiydi, shuning uchun SQL literal'larini so'rov ichiga yozadigan Gridify bu yerda tezroq ko'rinadi. Real bazada bu ustunlik yo'qoladi. Qiymatlar har so'rovda o'zgarganda esa Gridify har safar yangi so'rov kompilyatsiya qiladi.
-Real bazada 10k qatorli jadvalda vaqtning asosiy qismi tarmoq roundtrip'iga ketadi, shuning uchun ±5% farq shovqin chegarasida.
+¹ EF InMemory re-reads query parameters for every row, so Gridify, which inlines SQL literals, looks faster there. That advantage disappears on a real database, and when values change per request Gridify recompiles the query every time.
+On a 10k-row table most of the time is the network roundtrip, so differences of ±5% are within noise.
 
-Benchmarklarni ishga tushirish (PostgreSQL testlari `localhost:5432` dagi bazaga ulanadi, ulanish satri: `benchmarks/Qryx.Benchmarks/Services/PostgresBenchmarkHelper.cs`):
+Running the benchmarks (the PostgreSQL suites connect to `localhost:5432`; connection string in `benchmarks/Qryx.Benchmarks/Services/PostgresBenchmarkHelper.cs`):
 ```bash
-# Barcha testlarni (Construction, InMemory, PostgreSQL, Concurrency, Pagination, Unique values, Auto Prepare) ishga tushirish:
+# All suites (construction, InMemory, PostgreSQL, concurrency, pagination, unique values, Auto Prepare)
 dotnet run -c Release --project benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj -- --fast
 
-# Faqat "har so'rovda yangi qiymat" (real API trafigi) testi:
+# Only "new values per request" (realistic API traffic)
 dotnet run -c Release --project benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj -- --unique
 
-# Faqat Npgsql Auto Prepare (prepared statements) testi:
+# Only Npgsql Auto Prepare (prepared statements)
 dotnet run -c Release --project benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj -- --prepare
 
-# Faqat Real PostgreSQL Docker bazasini testlash:
+# Only real PostgreSQL
 dotnet run -c Release --project benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj -- --postgres
 
-# Rasmiy BenchmarkDotNet testlari:
+# Official BenchmarkDotNet runs
 dotnet run -c Release --project benchmarks/Qryx.Benchmarks/Qryx.Benchmarks.csproj -- --bdn
 ```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome: bug reports, documentation (including English translations of the guide), tests and features. Read [CONTRIBUTING.md](https://github.com/0605AbMu/qryx/blob/master/CONTRIBUTING.md) before opening a pull request, and follow the [Code of Conduct](https://github.com/0605AbMu/qryx/blob/master/CODE_OF_CONDUCT.md).
+
+- 📝 Changes per release: [CHANGELOG.md](https://github.com/0605AbMu/qryx/blob/master/CHANGELOG.md)
+- 🔒 Security issues: please report them privately as described in [SECURITY.md](https://github.com/0605AbMu/qryx/blob/master/SECURITY.md), not in public issues.
+
+## 📄 License
+
+Qryx is licensed under the [MIT License](https://github.com/0605AbMu/qryx/blob/master/LICENSE).

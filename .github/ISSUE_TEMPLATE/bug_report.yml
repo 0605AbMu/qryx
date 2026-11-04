@@ -1,0 +1,118 @@
+name: 🐛 Bug report
+description: Something in Qryx does not work as documented.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please **do not** report security vulnerabilities here — use [private vulnerability reporting](https://github.com/0605AbMu/qryx/security/advisories/new) instead (see SECURITY.md).
+
+  - type: input
+    id: qryx-version
+    attributes:
+      label: Qryx version
+      description: Version of the Qryx packages you use.
+      placeholder: "2.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: packages
+    attributes:
+      label: Affected package(s)
+      multiple: true
+      options:
+        - Qryx.Core
+        - Qryx.Expressions
+        - Qryx.EntityFramework
+        - Qryx.AspNetCore
+        - Qryx.SourceGenerator
+        - Qryx.OpenApi
+        - Qryx.Swashbuckle
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: dotnet-version
+    attributes:
+      label: .NET SDK / runtime version
+      description: Output of `dotnet --version`.
+      placeholder: "10.0.100"
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Database provider and version
+      placeholder: "PostgreSQL 17 + Npgsql.EntityFrameworkCore.PostgreSQL 10.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Hosting model
+      options:
+        - Minimal API
+        - MVC controllers
+        - No ASP.NET Core (IQueryable only)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dto
+    attributes:
+      label: DTO and entity
+      description: The smallest DTO (with its `[Filter]` / `[Sortable]` attributes) and entity that reproduce the problem.
+      render: csharp
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Request URL
+      description: The query string that triggers the problem.
+      placeholder: "/api/users?minAge=20&status=Active&sortBy=CreatedAt&pageSize=10"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Response body, status code, exception and stack trace.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: sql
+    attributes:
+      label: Generated SQL (optional)
+      description: From `query.ToQueryString()` or the EF Core command log.
+      render: sql
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Workarounds, related issues, a link to a repro repository.

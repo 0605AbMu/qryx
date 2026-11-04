@@ -1,0 +1,55 @@
+name: ✨ Feature request
+description: Suggest a new operator, integration or improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! For larger changes, please agree on the design here before opening a pull request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard or impossible with Qryx today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How it could look for users — a DTO attribute, a request URL, an option. Code samples are welcome.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today, or how other libraries (Gridify, Sieve, OData) solve it.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Filtering / operators
+        - Sorting
+        - Pagination
+        - ASP.NET Core binding
+        - Source generator
+        - OpenAPI / Swagger
+        - Performance
+        - Documentation
+        - Other
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to implement this myself.
