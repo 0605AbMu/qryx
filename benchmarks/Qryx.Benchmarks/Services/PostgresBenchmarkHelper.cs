@@ -8,13 +8,30 @@ public class PostgresBenchmarkDbContext : DbContext
 {
     public const string ConnectionString = "Host=localhost;Port=5432;Database=qryx_benchmark;Username=taxi;Password=taxi;Pooling=true;Minimum Pool Size=5;Maximum Pool Size=50;";
 
+    /// <summary>
+    /// Same database with Npgsql automatic prepared statements: after 2 executions of an identical SQL text,
+    /// PostgreSQL reuses the parsed/planned statement. Only helps when the SQL text is stable (parameterized).
+    /// </summary>
+    public const string AutoPrepareConnectionString = ConnectionString + "Max Auto Prepare=50;Auto Prepare Min Usages=2;";
+
+    private readonly string _connectionString;
+
+    public PostgresBenchmarkDbContext() : this(ConnectionString)
+    {
+    }
+
+    public PostgresBenchmarkDbContext(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
     public DbSet<BenchmarkUser> Users => Set<BenchmarkUser>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseNpgsql(ConnectionString);
+            optionsBuilder.UseNpgsql(_connectionString);
         }
     }
 

@@ -28,7 +28,7 @@ public class ConstructionBenchmarks
     // Gridify inputs
     private const string GridifySimpleFilter = "Status=Active";
     private const string GridifyRangeFilter = "Age >= 25, Age <= 40";
-    private const string GridifyOrFilter = "(FirstName =* Ali|LastName =* Ali)";
+    private const string GridifyOrFilter = "(FirstName ^ Ali|LastName ^ Ali)";
     private GridifyQuery _gridifyComplexQuery = null!;
 
     // Sieve inputs
@@ -75,7 +75,7 @@ public class ConstructionBenchmarks
         // Gridify
         _gridifyComplexQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20

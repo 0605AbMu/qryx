@@ -30,7 +30,7 @@ public static class PostgresDiagnostic
 
         var gridifyQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20
@@ -163,7 +163,7 @@ public static class PostgresDiagnostic
             MaxAge = 40,
             Page = 2,
             PageSize = 20,
-            IncludeTotalCount = true
+            IncludeTotal = true
         };
 
         var singleQueryDto = new UserBenchmarkDto
@@ -173,7 +173,7 @@ public static class PostgresDiagnostic
             MaxAge = 40,
             Page = 2,
             PageSize = 20,
-            IncludeTotalCount = false
+            IncludeTotal = false
         };
 
         var cursorDto = new UserBenchmarkDto
@@ -182,7 +182,7 @@ public static class PostgresDiagnostic
             MinAge = 25,
             MaxAge = 40,
             PageSize = 20,
-            AfterCursor = "2000"
+            AfterCursor = BenchmarkDataHelper.CursorAfterId(2000)
         };
 
         // Warmup

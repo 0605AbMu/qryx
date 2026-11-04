@@ -18,6 +18,15 @@ public class BenchmarkDbContext : DbContext
 
 public static class BenchmarkDataHelper
 {
+    /// <summary>
+    /// Keyset cursor that continues after the user with <paramref name="id"/> in the default ordering
+    /// (no sortBy -> primary key). Same token a client would get as <c>nextCursor</c>.
+    /// </summary>
+    public static string CursorAfterId(int id) =>
+        Qryx.Expressions.Builders.PaginationBuilder.CreateCursor(
+            new BenchmarkUser { Id = id },
+            Qryx.Expressions.Builders.SortBuilder.ResolveSort<BenchmarkUser>(sortBy: null, isDescending: false, typeof(UserBenchmarkDto)))!;
+
     public static List<BenchmarkUser> GenerateUsers(int count = 10_000)
     {
         var random = new Random(42); // deterministic seed
@@ -80,6 +89,9 @@ public static class BenchmarkDataHelper
         httpContext.RequestServices = sp;
         httpContext.Request.QueryString = new QueryString(queryString);
 
-        return new ODataQueryOptions<BenchmarkUser>(context, httpContext.Request);
+        // ODataQueryOptions mutates its ODataQueryContext, so a context must not be shared between threads
+        // (ASP.NET Core creates one per request as well). The EDM model itself is immutable and reused.
+        var requestContext = new ODataQueryContext(context.Model, typeof(BenchmarkUser), context.Path);
+        return new ODataQueryOptions<BenchmarkUser>(requestContext, httpContext.Request);
     }
 }
