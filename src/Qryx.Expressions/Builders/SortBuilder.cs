@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
+using Qryx.Core.Constants;
 using Qryx.Core.Contracts;
+using Qryx.Core.Exceptions;
 using Qryx.Expressions.Metadata;
 
 namespace Qryx.Expressions.Builders;
@@ -27,6 +29,11 @@ public static class SortBuilder
     private static readonly ConcurrentDictionary<(string SortBy, bool Descending), (string PropertyName, bool IsDescending)[]> ClauseCache = new();
     private static readonly ConcurrentDictionary<(Type EntityType, string PropertyName, bool IsDescending, bool IsFirst), Func<IQueryable, IQueryable>> SortStepCache = new();
 
+    /// <summary>
+    /// Applies the request's ordering: whitelisted <c>SortBy</c> clauses plus the primary key as tie-breaker
+    /// (deterministic pages, and the same ordering keyset cursors continue). Without <c>SortBy</c> an ordering the
+    /// developer already applied to <paramref name="source"/> is kept; otherwise rows are ordered by primary key.
+    /// </summary>
     public static IQueryable<TEntity> Apply<TEntity>(
         IQueryable<TEntity> source,
         IQryxRequest<TEntity> request,
@@ -35,14 +42,22 @@ public static class SortBuilder
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!string.IsNullOrWhiteSpace(request.SortBy))
-        {
-            return Apply(source, request.SortBy, request.IsDescending, throwOnInvalidProperty, request.GetType());
-        }
+        if (string.IsNullOrWhiteSpace(request.SortBy) && HasOrdering(source))
+            return source;
 
-        return EnsureOrdering(source, request.IsDescending);
+        var plan = ResolveSort<TEntity>(request.SortBy, request.IsDescending, request.GetType(), throwOnInvalidProperty);
+
+        // Every clause was rejected: keep an ordering the developer already applied, else primary key
+        if (!plan.HasClientKeys && HasOrdering(source))
+            return source;
+
+        return ApplySort(source, plan);
     }
 
+    /// <summary>
+    /// Applies whitelisted <paramref name="sortBy"/> clauses (plus primary-key tie-breaker). Returns
+    /// <paramref name="source"/> unchanged when no clause is valid.
+    /// </summary>
     public static IQueryable<TEntity> Apply<TEntity>(
         IQueryable<TEntity> source,
         string? sortBy,
@@ -52,48 +67,106 @@ public static class SortBuilder
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        if (string.IsNullOrWhiteSpace(sortBy))
-            return source;
+        var plan = ResolveSort<TEntity>(sortBy, isDescending, dtoType, throwOnInvalidProperty);
+        return plan.HasClientKeys ? ApplySort(source, plan) : source;
+    }
 
+    /// <summary>
+    /// Resolves <paramref name="sortBy"/> (e.g. <c>"createdAt desc, name"</c>) into a validated
+    /// <see cref="QryxSortPlan"/>: only [Sortable] properties (DTO or entity), canonical names, duplicates removed,
+    /// at most <see cref="QryxConstants.MaxSortClauses"/> clauses; then the primary key is appended as tie-breaker
+    /// (direction of the last clause, or <paramref name="isDescending"/> when there is no valid clause).
+    /// Invalid clauses are skipped, or throw <see cref="QryxRequestException"/> when <paramref name="throwOnInvalidProperty"/>.
+    /// </summary>
+    public static QryxSortPlan ResolveSort<TEntity>(
+        string? sortBy,
+        bool isDescending = false,
+        Type? dtoType = null,
+        bool throwOnInvalidProperty = false)
+    {
         var entityMetadata = MetadataCache.GetEntityMetadata<TEntity>();
+        var keys = new List<QryxSortKey>(4);
 
-        if (ClauseCache.Count > 5000)
+        if (!string.IsNullOrWhiteSpace(sortBy))
         {
-            ClauseCache.Clear();
-        }
-
-        // Support multiple comma-separated fields: e.g. "CreatedAt desc, Name asc" or single field
-        var sortClauses = ClauseCache.GetOrAdd((sortBy, isDescending), static k => ParseSortClauses(k.SortBy, k.Descending));
-
-        var dtoMetadata = dtoType != null ? MetadataCache.GetDtoMetadata(dtoType) : null;
-        IOrderedQueryable<TEntity>? orderedQuery = null;
-        bool isFirst = true;
-
-        for (int i = 0; i < sortClauses.Length; i++)
-        {
-            var clause = sortClauses[i];
-            if (!IsPropertySortable(clause.PropertyName, dtoMetadata, entityMetadata))
+            // DoS guard: haddan tashqari uzun sortBy keshga ham, parserga ham tushmaydi
+            if (sortBy.Length > QryxConstants.MaxSortByLength)
             {
                 if (throwOnInvalidProperty)
                 {
-                    throw new ArgumentException(
-                        $"Sort property '{clause.PropertyName}' is not allowed or does not exist on entity '{typeof(TEntity).Name}'.",
-                        nameof(sortBy));
+                    throw new QryxRequestException(
+                        nameof(IQryxRequest.SortBy),
+                        $"Sort expression must not exceed {QryxConstants.MaxSortByLength} characters.");
+                }
+            }
+            else
+            {
+                if (ClauseCache.Count > 5000)
+                {
+                    ClauseCache.Clear();
                 }
 
-                // If invalid and not throwing, ignore this clause
-                continue;
+                var clauses = ClauseCache.GetOrAdd((sortBy, isDescending), static k => ParseSortClauses(k.SortBy, k.Descending));
+                if (clauses.Length > QryxConstants.MaxSortClauses && throwOnInvalidProperty)
+                {
+                    throw new QryxRequestException(
+                        nameof(IQryxRequest.SortBy),
+                        $"At most {QryxConstants.MaxSortClauses} sort fields are allowed.");
+                }
+
+                var dtoMetadata = dtoType != null ? MetadataCache.GetDtoMetadata(dtoType) : null;
+                var count = Math.Min(clauses.Length, QryxConstants.MaxSortClauses);
+                for (int i = 0; i < count; i++)
+                {
+                    var clause = clauses[i];
+                    if (!TryGetSortablePropertyName(clause.PropertyName, dtoMetadata, entityMetadata, out var canonical))
+                    {
+                        if (throwOnInvalidProperty)
+                        {
+                            throw new QryxRequestException(
+                                nameof(IQryxRequest.SortBy),
+                                $"Sort property '{clause.PropertyName}' is not allowed or does not exist on entity '{typeof(TEntity).Name}'.");
+                        }
+
+                        continue; // invalid clause is ignored
+                    }
+
+                    if (!keys.Exists(k => string.Equals(k.Path, canonical, StringComparison.OrdinalIgnoreCase)))
+                        keys.Add(new QryxSortKey(canonical, clause.IsDescending));
+                }
             }
-
-            var key = (typeof(TEntity), clause.PropertyName, clause.IsDescending, isFirst);
-            var step = SortStepCache.GetOrAdd(key, static k => CreateSortStep(k.EntityType, k.PropertyName, k.IsDescending, k.IsFirst));
-
-            var currentQuery = (IQueryable)(orderedQuery ?? source);
-            orderedQuery = (IOrderedQueryable<TEntity>)step(currentQuery);
-            isFirst = false;
         }
 
-        return orderedQuery ?? source;
+        var hasClientKeys = keys.Count > 0;
+
+        // Primary key tie-breaker: rows with equal sort values get a stable order (offset pages never overlap and
+        // keyset cursors are unique). Kalit nomi kanonik, shuning uchun kesh chegaralangan.
+        var primaryKey = entityMetadata.PrimaryKeyProperty?.Name;
+        if (primaryKey != null && entityMetadata.HasProperty(primaryKey) &&
+            !keys.Exists(k => string.Equals(k.Path, primaryKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            keys.Add(new QryxSortKey(primaryKey, hasClientKeys ? keys[^1].Descending : isDescending));
+        }
+
+        return new QryxSortPlan([.. keys], hasClientKeys);
+    }
+
+    /// <summary>Applies a resolved plan as OrderBy/ThenBy (cached, pre-built steps). Empty plan: source unchanged.</summary>
+    public static IQueryable<TEntity> ApplySort<TEntity>(IQueryable<TEntity> source, QryxSortPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        IQueryable current = source;
+        var keys = plan.KeyArray;
+        for (int i = 0; i < keys.Length; i++)
+        {
+            var key = (typeof(TEntity), keys[i].Path, keys[i].Descending, i == 0);
+            var step = SortStepCache.GetOrAdd(key, static k => CreateSortStep(k.EntityType, k.PropertyName, k.IsDescending, k.IsFirst));
+            current = step(current);
+        }
+
+        return (IQueryable<TEntity>)current;
     }
 
     public static bool IsPropertySortable<TEntity>(string propertyName, Type? dtoType, EntityMetadata entityMetadata)
@@ -103,26 +176,61 @@ public static class SortBuilder
     }
 
     public static bool IsPropertySortable(string propertyName, DtoMetadata? dtoMetadata, EntityMetadata entityMetadata)
+        => TryGetSortablePropertyName(propertyName, dtoMetadata, entityMetadata, out _);
+
+    /// <summary>
+    /// Resolves a client-supplied property name against the [Sortable] whitelist.
+    /// The whitelist is checked BEFORE any entity lookup, so arbitrary client strings never reach
+    /// metadata caches; the returned canonical name (as declared) is safe to use as a cache key.
+    /// </summary>
+    public static bool TryGetSortablePropertyName(
+        string propertyName,
+        DtoMetadata? dtoMetadata,
+        EntityMetadata entityMetadata,
+        out string canonicalName)
     {
-        if (!entityMetadata.HasProperty(propertyName))
-            return false;
-
-        // 1. Check DTO properties with [Sortable]
-        if (dtoMetadata != null && dtoMetadata.SortableProperties.Contains(propertyName))
-        {
-            return true;
-        }
-
-        // 2. Check Entity properties with [Sortable]
-        if (entityMetadata.SortableProperties.Contains(propertyName))
-        {
-            return true;
-        }
+        ArgumentNullException.ThrowIfNull(entityMetadata);
 
         // Sortable is the single source of truth:
-        // If neither DTO nor Entity property has [Sortable], sorting by this property is not allowed.
+        // 1. DTO properties with [Sortable], 2. Entity properties with [Sortable]
+        if ((dtoMetadata != null && TryGetFromSet(dtoMetadata.SortableProperties, propertyName, out canonicalName)) ||
+            TryGetFromSet(entityMetadata.SortableProperties, propertyName, out canonicalName))
+        {
+            return entityMetadata.HasProperty(canonicalName);
+        }
+
+        canonicalName = string.Empty;
         return false;
     }
+
+    internal static bool TryGetFromSet(IReadOnlySet<string> set, string value, out string canonical)
+    {
+        if (set is HashSet<string> hashSet)
+        {
+            if (hashSet.TryGetValue(value, out var actual))
+            {
+                canonical = actual;
+                return true;
+            }
+        }
+        else
+        {
+            foreach (var item in set)
+            {
+                if (string.Equals(item, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    canonical = item;
+                    return true;
+                }
+            }
+        }
+
+        canonical = string.Empty;
+        return false;
+    }
+
+    /// <summary>Number of cached sort steps for an entity type (diagnostics / tests).</summary>
+    internal static int CountCachedSortSteps(Type entityType) => SortStepCache.Keys.Count(k => k.EntityType == entityType);
 
     /// <summary>
     /// Applies sorting directly by property name, bypassing external user input whitelist validation.
