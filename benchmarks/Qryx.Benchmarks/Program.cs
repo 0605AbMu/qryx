@@ -9,6 +9,18 @@ public class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+        if (args.Contains("--prepare"))
+        {
+            FastDiagnosticRunner.RunPreparedStatementsSuite();
+            return;
+        }
+
+        if (args.Contains("--unique"))
+        {
+            FastDiagnosticRunner.RunUniqueValuesSuite();
+            return;
+        }
+
         if (args.Contains("--postgres") || args.Contains("--pg"))
         {
             if (args.Contains("--diag"))

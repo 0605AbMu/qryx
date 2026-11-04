@@ -70,7 +70,7 @@ public class PostgresExecutionBenchmarks
             IsDescending = true,
             Page = 2,
             PageSize = 20,
-            IncludeTotalCount = false
+            IncludeTotal = false
         };
 
         _qryxCursorDto = new UserBenchmarkDto
@@ -80,12 +80,12 @@ public class PostgresExecutionBenchmarks
             Status = "Active",
             FullName = "Ali",
             PageSize = 20,
-            AfterCursor = "2000"
+            AfterCursor = BenchmarkDataHelper.CursorAfterId(2000)
         };
 
         _gridifyComplexQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20

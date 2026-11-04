@@ -69,7 +69,7 @@ public class ExecutionBenchmarks
 
         _gridifyComplexQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20

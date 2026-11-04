@@ -28,12 +28,14 @@ public static class FastDiagnosticRunner
         RunPostgresExecutionSuite();
         RunConcurrencyStressSuite();
         RunPaginationStrategiesSuite();
+        RunUniqueValuesSuite();
+        RunPreparedStatementsSuite();
     }
 
     public static void RunConstructionSuite()
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[1/3] BENCHMARK: Query Construction & AST/Expression Tree Building (50,000 iterations)");
+        Console.WriteLine("\n[1/7] BENCHMARK: Query Construction & AST/Expression Tree Building (7 rounds x 10,000 iterations)");
         Console.WriteLine("      (Measures library overhead: CPU time, Gen 0/1/2 pressure, and allocated heap bytes)");
         Console.ResetColor();
 
@@ -58,7 +60,7 @@ public static class FastDiagnosticRunner
 
         var gridifyQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20
@@ -86,50 +88,34 @@ public static class FastDiagnosticRunner
             BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex).ApplyTo(dummyQuery);
         }
 
-        const int iterations = 50_000;
-
-        // Test Qryx Source Generator (Roslyn Compile-time, 0.00 ns Reflection)
-        var qryxSourceGenMetric = MeasureMetric("Qryx (Roslyn Source Generator)", iterations, () =>
-        {
-            return dummyQuery.ApplyGenerated(qryxComplex);
-        });
-
-        // Test Qryx
-        var qryxMetric = MeasureMetric("Qryx (DTO Compiled Delegates)", iterations, () =>
-        {
-            var q = FilterBuilder.Apply(dummyQuery, qryxComplex);
-            q = SortBuilder.Apply(q, qryxComplex);
-            return PaginationBuilder.ApplyOffset(q, qryxComplex);
-        });
-
-        // Test Gridify
-        var gridifyMetric = MeasureMetric("Gridify (String Lexer/Parser)", iterations, () =>
-        {
-            var q = dummyQuery.ApplyFiltering(gridifyQuery.Filter);
-            q = q.ApplyOrdering(gridifyQuery.OrderBy);
-            return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize);
-        });
-
-        // Test Sieve
-        var sieveMetric = MeasureMetric("Sieve (String Tokenizer/Mapper)", iterations, () =>
-        {
-            return sieveProcessor.Apply(sieveModel, dummyQuery);
-        });
-
-        // Test OData
-        var odataMetric = MeasureMetric("OData (EDM Model + URI Parser)", iterations, () =>
-        {
-            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-            return opt.ApplyTo(dummyQuery);
-        });
-
-        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        // 7 rounds x 10,000 iterations per framework (round order rotates)
+        PrintResultsTable(MeasureInterleaved(10_000, rounds: 7, warmup: 2_000,
+            // Qryx Source Generator (Roslyn compile-time)
+            ("Qryx (Roslyn Source Generator)", () => dummyQuery.ApplyGenerated(qryxComplex)),
+            ("Qryx (DTO Compiled Delegates)", () =>
+            {
+                var q = FilterBuilder.Apply(dummyQuery, qryxComplex);
+                q = SortBuilder.Apply(q, qryxComplex);
+                return PaginationBuilder.ApplyOffset(q, qryxComplex);
+            }),
+            ("Gridify (String Lexer/Parser)", () =>
+            {
+                var q = dummyQuery.ApplyFiltering(gridifyQuery.Filter);
+                q = q.ApplyOrdering(gridifyQuery.OrderBy);
+                return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize);
+            }),
+            ("Sieve (String Tokenizer/Mapper)", () => sieveProcessor.Apply(sieveModel, dummyQuery)),
+            ("OData (EDM Model + URI Parser)", () =>
+            {
+                var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
+                return opt.ApplyTo(dummyQuery);
+            })));
     }
 
     public static void RunExecutionSuite()
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[2/3] BENCHMARK: End-to-End Query Execution against EF Core InMemory (10,000 Entities, 5,000 iters)");
+        Console.WriteLine("\n[2/7] BENCHMARK: End-to-End Query Execution against EF Core InMemory (10,000 Entities, 7 rounds x 700 iters)");
         Console.WriteLine("      (Measures real query evaluation, filtering, sorting, paging and materialization .ToList())");
         Console.ResetColor();
 
@@ -155,7 +141,7 @@ public static class FastDiagnosticRunner
 
         var gridifyQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20
@@ -171,66 +157,40 @@ public static class FastDiagnosticRunner
 
         const string odataComplex = "?$filter=Age ge 25 and Age le 40 and Status eq 'Active' and (startswith(FirstName, 'Ali') or startswith(LastName, 'Ali'))&$orderby=CreatedAt desc&$skip=20&$top=20";
 
-        var qryxSourceGenTest = db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
-        var qryxTest = PaginationBuilder.ApplyOffset(SortBuilder.Apply(FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex), qryxComplex), qryxComplex).ToList();
-        var gridifyTest = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy!).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
-        var sieveTest = sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
-        var optTest = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-        var odataTest = ((IQueryable<BenchmarkUser>)optTest.ApplyTo(db.Users.AsNoTracking())).ToList();
-        Console.WriteLine($"      [Verification] Items returned: Qryx(SourceGen)={qryxSourceGenTest.Count}, Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
+        VerifyFilterParity(db.Users.AsNoTracking(), qryxComplex, gridifyQuery.Filter!, sieveModel, sieveProcessor, context, sp, odataComplex);
 
-        // Warmup all frameworks equally to ensure JIT & EF query compiler cache readiness
-        for (int i = 0; i < 20; i++)
-        {
-            db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
-            var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
-            q = SortBuilder.Apply(q, qryxComplex);
-            PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
-            db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
-            sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
-            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-            ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
-        }
+        // 7 rounds x 700 iterations per framework (round order rotates)
+        PrintResultsTable(MeasureInterleaved(700, rounds: 7, warmup: 300,
+            ("Qryx (Execute & Materialize)", () =>
+            {
+                var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
+                q = SortBuilder.Apply(q, qryxComplex);
+                return PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
+            }),
+            ("Qryx (Source Generator LINQ)", () => db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList()),
+            ("Gridify (Execute & Materialize)", () =>
+            {
+                var q = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter);
+                q = q.ApplyOrdering(gridifyQuery.OrderBy);
+                return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
+            }),
+            ("Sieve (Execute & Materialize)", () => sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList()),
+            ("OData (Execute & Materialize)", () =>
+            {
+                var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
+                return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
+            })));
 
-        const int iterations = 5_000;
-
-        var qryxSourceGenMetric = MeasureMetric("Qryx (Source Generator LINQ)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
-        });
-
-        var qryxMetric = MeasureMetric("Qryx (Execute & Materialize)", iterations, () =>
-        {
-            var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
-            q = SortBuilder.Apply(q, qryxComplex);
-            return PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
-        });
-
-        var gridifyMetric = MeasureMetric("Gridify (Execute & Materialize)", iterations, () =>
-        {
-            var q = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter);
-            q = q.ApplyOrdering(gridifyQuery.OrderBy);
-            return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
-        });
-
-        var sieveMetric = MeasureMetric("Sieve (Execute & Materialize)", iterations, () =>
-        {
-            return sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
-        });
-
-        var odataMetric = MeasureMetric("OData (Execute & Materialize)", iterations, () =>
-        {
-            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-            return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
-        });
-
-        PrintResultsTable([qryxMetric, qryxSourceGenMetric, gridifyMetric, sieveMetric, odataMetric]);
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("  Note: EF InMemory evaluates every query parameter per row, so a library that inlines SQL literals");
+        Console.WriteLine("  (Gridify) looks faster here than on a real database. See [3/7], [6/7] and [7/7].");
+        Console.ResetColor();
     }
 
     public static void RunPostgresExecutionSuite()
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[3/4] BENCHMARK: Real PostgreSQL Database (Docker localhost:5432, 10,000 Entities, 500 iters)");
+        Console.WriteLine("\n[3/7] BENCHMARK: Real PostgreSQL Database (Docker localhost:5432, 10,000 Entities, 7 rounds x 70 iters)");
         Console.WriteLine("      (Measures actual database roundtrip, SQL translation, B-Tree index utilization, and deserialization)");
         Console.ResetColor();
 
@@ -267,7 +227,7 @@ public static class FastDiagnosticRunner
 
         var gridifyQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20
@@ -290,80 +250,48 @@ public static class FastDiagnosticRunner
             Status = "Active",
             FullName = "Ali",
             PageSize = 20,
-            AfterCursor = "2000"
+            AfterCursor = BenchmarkDataHelper.CursorAfterId(2000)
         };
 
-        var qryxSourceGenTest = db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
-        var qryxTest = PaginationBuilder.ApplyOffset(SortBuilder.Apply(FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex), qryxComplex), qryxComplex).ToList();
-        var gridifyTest = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter).ApplyOrdering(gridifyQuery.OrderBy!).ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
-        var sieveTest = sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
-        var optTest = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-        var odataTest = ((IQueryable<BenchmarkUser>)optTest.ApplyTo(db.Users.AsNoTracking())).ToList();
-        Console.WriteLine($"      [Postgres Verification] Items returned: Qryx(SourceGen)={qryxSourceGenTest.Count}, Qryx={qryxTest.Count}, Gridify={gridifyTest.Count}, Sieve={sieveTest.Count}, OData={odataTest.Count}");
+        VerifyFilterParity(db.Users.AsNoTracking(), qryxComplex, gridifyQuery.Filter!, sieveModel, sieveProcessor, context, sp, odataComplex);
 
-        // Warmup connection pool
-        for (int i = 0; i < 20; i++)
-        {
-            PaginationBuilder.ApplyOffset(SortBuilder.Apply(FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex), qryxComplex), qryxComplex).ToList();
-            db.Users.AsNoTracking().ToPagedResultAsync(qryxCursorDto, x => new UserSummaryDto(x.Id, x.FirstName, x.Age, x.Status)).GetAwaiter().GetResult();
-        }
+        // 7 rounds x 70 iterations per framework (round order rotates). Baseline = same work as competitors (offset page).
+        PrintResultsTable(MeasureInterleaved(70, rounds: 7, warmup: 100,
+            ("Qryx (Standard: Dynamic AST)", () =>
+            {
+                var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
+                q = SortBuilder.Apply(q, qryxComplex);
+                return PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
+            }),
+            ("Gridify (Postgres Real DB)", () =>
+            {
+                var q = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter);
+                q = q.ApplyOrdering(gridifyQuery.OrderBy!);
+                return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
+            }),
+            ("Sieve (Postgres Real DB)", () => sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList()),
+            ("OData (Postgres Real DB)", () =>
+            {
+                var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
+                return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
+            }),
+            ("Qryx (Source Generator LINQ)", () => db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList()),
+            // Different (cheaper) query shape: seek after Id 2000 ordered by Id, not "ORDER BY CreatedAt OFFSET 20"
+            ("Qryx (Keyset Index Seek)*", () => db.Users.AsNoTracking().ToPagedResultAsync(qryxCursorDto).GetAwaiter().GetResult()),
+            ("Qryx (Keyset + Projection)*", () => db.Users.AsNoTracking()
+                .ToPagedResultAsync(qryxCursorDto, x => new UserSummaryDto(x.Id, x.FirstName, x.Age, x.Status))
+                .GetAwaiter().GetResult())));
 
-        const int iterations = 500;
-
-        // 1. Qryx Max: Keyset Cursor Seek + Projection Pushdown
-        var qryxPeakMetric = MeasureMetric("Qryx (Max: Keyset + Projection)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ToPagedResultAsync(qryxCursorDto, x => new UserSummaryDto(x.Id, x.FirstName, x.Age, x.Status)).GetAwaiter().GetResult();
-        });
-
-        // 2. Qryx Max: Keyset Cursor Seek (Full Entity)
-        var qryxKeysetMetric = MeasureMetric("Qryx (Max: Keyset Index Seek)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ToPagedResultAsync(qryxCursorDto).GetAwaiter().GetResult();
-        });
-
-        // 3. Qryx Source Generator (Compiled LINQ)
-        var qryxSourceGenMetric = MeasureMetric("Qryx (Source Generator LINQ)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ApplyGenerated(qryxComplex).ToList();
-        });
-
-        // 4. Qryx Standard: Offset Pagination
-        var qryxMetric = MeasureMetric("Qryx (Standard: Dynamic AST)", iterations, () =>
-        {
-            var q = FilterBuilder.Apply(db.Users.AsNoTracking(), qryxComplex);
-            q = SortBuilder.Apply(q, qryxComplex);
-            return PaginationBuilder.ApplyOffset(q, qryxComplex).ToList();
-        });
-
-        // 5. Gridify
-        var gridifyMetric = MeasureMetric("Gridify (Postgres Real DB)", iterations, () =>
-        {
-            var q = db.Users.AsNoTracking().ApplyFiltering(gridifyQuery.Filter);
-            q = q.ApplyOrdering(gridifyQuery.OrderBy!);
-            return q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize).ToList();
-        });
-
-        // 6. Sieve
-        var sieveMetric = MeasureMetric("Sieve (Postgres Real DB)", iterations, () =>
-        {
-            return sieveProcessor.Apply(sieveModel, db.Users.AsNoTracking()).ToList();
-        });
-
-        // 7. OData
-        var odataMetric = MeasureMetric("OData (Postgres Real DB)", iterations, () =>
-        {
-            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-            return ((IQueryable<BenchmarkUser>)opt.ApplyTo(db.Users.AsNoTracking())).ToList();
-        });
-
-        PrintResultsTable([qryxPeakMetric, qryxKeysetMetric, qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("  * Keyset rows run a different query (index seek by Id, no OFFSET); compare them with each other,");
+        Console.WriteLine("    not with the offset-paging rows. On 10k rows every query is dominated by the network roundtrip.");
+        Console.ResetColor();
     }
 
     public static void RunConcurrencyStressSuite()
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[4/4] BENCHMARK: Multi-Threaded Stress Test (Parallel.For, 100,000 Operations)");
+        Console.WriteLine("\n[4/7] BENCHMARK: Multi-Threaded Stress Test (Parallel.For, 5 rounds x 20,000 Operations)");
         Console.WriteLine("      (Measures thread contention, metadata cache efficiency and lock-free concurrency)");
         Console.ResetColor();
 
@@ -386,7 +314,7 @@ public static class FastDiagnosticRunner
 
         var gridifyQuery = new GridifyQuery
         {
-            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName =* Ali|LastName =* Ali)",
+            Filter = "Age >= 25, Age <= 40, Status=Active, (FirstName ^ Ali|LastName ^ Ali)",
             OrderBy = "CreatedAt desc",
             Page = 2,
             PageSize = 20
@@ -402,45 +330,33 @@ public static class FastDiagnosticRunner
 
         const string odataComplex = "?$filter=Age ge 25 and Age le 40 and Status eq 'Active' and (startswith(FirstName, 'Ali') or startswith(LastName, 'Ali'))&$orderby=CreatedAt desc&$skip=20&$top=20";
 
-        const int totalParallelOps = 100_000;
-
-        var qryxSourceGenMetric = MeasureParallel("Qryx (Source Gen Parallel)", totalParallelOps, () =>
-        {
-            dummyQuery.ApplyGenerated(qryxComplex);
-        });
-
-        var qryxMetric = MeasureParallel("Qryx (Parallel)", totalParallelOps, () =>
-        {
-            var q = FilterBuilder.Apply(dummyQuery, qryxComplex);
-            q = SortBuilder.Apply(q, qryxComplex);
-            PaginationBuilder.ApplyOffset(q, qryxComplex);
-        });
-
-        var gridifyMetric = MeasureParallel("Gridify (Parallel)", totalParallelOps, () =>
-        {
-            var q = dummyQuery.ApplyFiltering(gridifyQuery.Filter);
-            q = q.ApplyOrdering(gridifyQuery.OrderBy);
-            q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize);
-        });
-
-        var sieveMetric = MeasureParallel("Sieve (Parallel)", totalParallelOps, () =>
-        {
-            sieveProcessor.Apply(sieveModel, dummyQuery);
-        });
-
-        var odataMetric = MeasureParallel("OData (Parallel)", totalParallelOps, () =>
-        {
-            var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
-            opt.ApplyTo(dummyQuery);
-        });
-
-        PrintResultsTable([qryxSourceGenMetric, qryxMetric, gridifyMetric, sieveMetric, odataMetric]);
+        // 5 rounds x 20,000 parallel operations per framework (round order rotates)
+        PrintResultsTable(MeasureParallelInterleaved(20_000, rounds: 5,
+            ("Qryx (Parallel)", () =>
+            {
+                var q = FilterBuilder.Apply(dummyQuery, qryxComplex);
+                q = SortBuilder.Apply(q, qryxComplex);
+                PaginationBuilder.ApplyOffset(q, qryxComplex);
+            }),
+            ("Qryx (Source Gen Parallel)", () => dummyQuery.ApplyGenerated(qryxComplex)),
+            ("Gridify (Parallel)", () =>
+            {
+                var q = dummyQuery.ApplyFiltering(gridifyQuery.Filter);
+                q = q.ApplyOrdering(gridifyQuery.OrderBy);
+                q.ApplyPaging(gridifyQuery.Page, gridifyQuery.PageSize);
+            }),
+            ("Sieve (Parallel)", () => sieveProcessor.Apply(sieveModel, dummyQuery)),
+            ("OData (Parallel)", () =>
+            {
+                var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, odataComplex);
+                opt.ApplyTo(dummyQuery);
+            })));
     }
 
     public static void RunPaginationStrategiesSuite()
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[5/5] BENCHMARK: PostgreSQL Pagination Strategies (Docker localhost:5432, 500 iters)");
+        Console.WriteLine("\n[5/7] BENCHMARK: PostgreSQL Pagination Strategies (Docker localhost:5432, 7 rounds x 70 iters)");
         Console.WriteLine("      (Measures impact of Single-Query, Keyset Cursor, and Zero-Copy Streaming vs Standard)");
         Console.ResetColor();
 
@@ -453,7 +369,7 @@ public static class FastDiagnosticRunner
             MaxAge = 40,
             Page = 2,
             PageSize = 20,
-            IncludeTotalCount = true
+            IncludeTotal = true
         };
 
         var singleQueryDto = new UserBenchmarkDto
@@ -463,7 +379,7 @@ public static class FastDiagnosticRunner
             MaxAge = 40,
             Page = 2,
             PageSize = 20,
-            IncludeTotalCount = false
+            IncludeTotal = false
         };
 
         var cursorDto = new UserBenchmarkDto
@@ -472,54 +388,375 @@ public static class FastDiagnosticRunner
             MinAge = 25,
             MaxAge = 40,
             PageSize = 20,
-            AfterCursor = "2000"
+            AfterCursor = BenchmarkDataHelper.CursorAfterId(2000)
         };
 
-        // Warmup
-        for (int i = 0; i < 10; i++)
+        // 7 rounds x 70 iterations per strategy (round order rotates)
+        PrintResultsTable(MeasureInterleaved(70, rounds: 7, warmup: 100,
+            ("Standard (Count + Data, 2 DB queries)", () => db.Users.AsNoTracking().ToPagedResultAsync(standardDto).GetAwaiter().GetResult()),
+            ("Single-Query (No Count, 1 DB query)", () => db.Users.AsNoTracking().ToPagedResultAsync(singleQueryDto).GetAwaiter().GetResult()),
+            ("Keyset Cursor (Index Seek, 1 DB query)", () => db.Users.AsNoTracking().ToPagedResultAsync(cursorDto).GetAwaiter().GetResult()),
+            ("Zero-Copy Stream (IAsyncEnumerable)", () =>
+            {
+                var stream = db.Users.AsNoTracking().ToPagedAsyncEnumerable(singleQueryDto);
+                var count = 0;
+                var enumerator = stream.GetAsyncEnumerator();
+                try
+                {
+                    while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+                    {
+                        count++;
+                    }
+                }
+                finally
+                {
+                    enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                return count;
+            })));
+    }
+
+    /// <summary>
+    /// Real API traffic: almost every request carries a different filter-value combination.
+    /// Libraries that inline values as SQL literals miss the EF Core compiled-query cache on every such request
+    /// (full LINQ-to-SQL recompilation); Qryx sends parameters and reuses one compiled query.
+    /// </summary>
+    public static void RunUniqueValuesSuite()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n[6/7] BENCHMARK: Unique Filter Values per Request (realistic API traffic, EF query cache behaviour)");
+        Console.WriteLine("      (MinAge/MaxAge/Name combinations repeat only every 33,263 requests -> literal-inlining = cache miss)");
+        Console.ResetColor();
+
+        var sieveProcessor = new BenchmarkSieveProcessor(Options.Create(new SieveOptions()), new BenchmarkSieveCustomFilterMethods());
+        var (context, sp) = BenchmarkDataHelper.CreateODataContext();
+        string[] names = ["Ali", "Vali", "Bob", "Jo", "Mal", "Sar", "Dil", "Zil"];
+
+        // Each framework gets its own monotonically increasing counter (see MeasureInterleaved), so values never repeat
+        // within a framework during the run: LCM(29, 31, 37) = 33,263 distinct combinations.
+        static (int MinAge, int MaxAge, string Name) Values(int i, string[] names)
         {
-            db.Users.AsNoTracking().ToPagedResultAsync(standardDto).GetAwaiter().GetResult();
-            db.Users.AsNoTracking().ToPagedResultAsync(singleQueryDto).GetAwaiter().GetResult();
-            db.Users.AsNoTracking().ToPagedResultAsync(cursorDto).GetAwaiter().GetResult();
+            var n = names[i % 37 % names.Length] + (i % 37 >= names.Length ? "x" + (i % 37) : "");
+            return (18 + i % 29, 40 + i % 31, n);
         }
 
-        const int iterations = 500;
-
-        var standardMetric = MeasureMetric("Standard (Count + Data, 2 DB queries)", iterations, () =>
+        void RunOn(string title, Func<IQueryable<BenchmarkUser>> source, int iterationsPerRound)
         {
-            return db.Users.AsNoTracking().ToPagedResultAsync(standardDto).GetAwaiter().GetResult();
-        });
-
-        var singleQueryMetric = MeasureMetric("Single-Query (No Count, 1 DB query)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ToPagedResultAsync(singleQueryDto).GetAwaiter().GetResult();
-        });
-
-        var cursorMetric = MeasureMetric("Keyset Cursor (Index Seek, 1 DB query)", iterations, () =>
-        {
-            return db.Users.AsNoTracking().ToPagedResultAsync(cursorDto).GetAwaiter().GetResult();
-        });
-
-        var streamMetric = MeasureMetric("Zero-Copy Stream (IAsyncEnumerable, 1 query)", iterations, () =>
-        {
-            var stream = db.Users.AsNoTracking().ToPagedAsyncEnumerable(singleQueryDto);
-            var count = 0;
-            var enumerator = stream.GetAsyncEnumerator();
-            try
-            {
-                while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            Console.WriteLine($"      -- {title}");
+            PrintResultsTable(MeasureInterleaved(iterationsPerRound, rounds: 7, warmup: 50,
+                ("Qryx (parameterized SQL)", i =>
                 {
-                    count++;
-                }
-            }
-            finally
-            {
-                enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-            return count;
-        });
+                    var (min, max, name) = Values(i, names);
+                    var dto = new UserBenchmarkDto { MinAge = min, MaxAge = max, Status = "Active", FullName = name, SortBy = nameof(BenchmarkUser.CreatedAt), IsDescending = true, Page = 2, PageSize = 20 };
+                    var q = FilterBuilder.Apply(source(), dto);
+                    q = SortBuilder.Apply(q, dto);
+                    return PaginationBuilder.ApplyOffset(q, dto).ToList();
+                }),
+                ("Gridify (inlines SQL literals)", i =>
+                {
+                    var (min, max, name) = Values(i, names);
+                    return source()
+                        .ApplyFiltering($"Age >= {min}, Age <= {max}, Status=Active, (FirstName ^ {name}|LastName ^ {name})")
+                        .ApplyOrdering("CreatedAt desc")
+                        .ApplyPaging(2, 20)
+                        .ToList();
+                }),
+                ("Sieve", i =>
+                {
+                    var (min, max, name) = Values(i, names);
+                    var model = new SieveModel { Filters = $"Age>={min},Age<={max},Status==Active,FullName=={name}", Sorts = "-CreatedAt", Page = 2, PageSize = 20 };
+                    return sieveProcessor.Apply(model, source()).ToList();
+                }),
+                ("OData", i =>
+                {
+                    var (min, max, name) = Values(i, names);
+                    var url = $"?$filter=Age ge {min} and Age le {max} and Status eq 'Active' and (startswith(FirstName, '{name}') or startswith(LastName, '{name}'))&$orderby=CreatedAt desc&$skip=20&$top=20";
+                    var opt = BenchmarkDataHelper.CreateODataOptions(context, sp, url);
+                    return ((IQueryable<BenchmarkUser>)opt.ApplyTo(source())).ToList();
+                })));
+        }
 
-        PrintResultsTable([standardMetric, singleQueryMetric, cursorMetric, streamMetric]);
+        using (var memDb = BenchmarkDataHelper.CreateInMemoryDbContext(BenchmarkDataHelper.GenerateUsers(10_000)))
+        {
+            RunOn("EF Core InMemory (10,000 entities)", () => memDb.Users.AsNoTracking(), 150);
+        }
+
+        try
+        {
+            PostgresBenchmarkHelper.EnsureDatabaseAndDataAsync(10_000).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"      [Postgres] Could not connect to PostgreSQL: {ex.Message}. Skipping Postgres part.");
+            Console.ResetColor();
+            return;
+        }
+
+        using var pgDb = new PostgresBenchmarkDbContext();
+        RunOn("Real PostgreSQL (Docker localhost:5432, 10,000 rows)", () => pgDb.Users.AsNoTracking(), 70);
+    }
+
+    /// <summary>
+    /// Where the remaining time goes on a real database, and what an application can still remove:
+    /// Npgsql automatic prepared statements (skip PostgreSQL parse/plan) need a STABLE SQL text, which Qryx's
+    /// parameterized SQL provides and literal-inlining (Gridify) does not when values change. A hand-written
+    /// EF.CompileQuery is shown as the EF Core ceiling (skips EF's per-query expression processing); it is a
+    /// reference row, not a Qryx feature.
+    /// </summary>
+    public static void RunPreparedStatementsSuite()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n[7/7] BENCHMARK: PostgreSQL Prepared Statements (Npgsql Max Auto Prepare) & EF Core Ceiling");
+        Console.WriteLine("      (Connection string: \"Max Auto Prepare=50;Auto Prepare Min Usages=2\" vs default; 7 rounds x 70 iters)");
+        Console.ResetColor();
+
+        try
+        {
+            PostgresBenchmarkHelper.EnsureDatabaseAndDataAsync(10_000).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"      [Postgres] Could not connect to PostgreSQL: {ex.Message}. Skipping prepared statements suite.");
+            Console.ResetColor();
+            return;
+        }
+
+        using var plainDb = new PostgresBenchmarkDbContext();
+        using var preparedDb = new PostgresBenchmarkDbContext(PostgresBenchmarkDbContext.AutoPrepareConnectionString);
+        string[] names = ["Ali", "Vali", "Bob", "Jo", "Mal", "Sar", "Dil", "Zil"];
+
+        static UserBenchmarkDto Request(int i, bool unique, string[] names)
+        {
+            if (!unique)
+            {
+                return new UserBenchmarkDto { MinAge = 25, MaxAge = 40, Status = "Active", FullName = "Ali", SortBy = nameof(BenchmarkUser.CreatedAt), IsDescending = true, Page = 2, PageSize = 20 };
+            }
+
+            var name = names[i % 37 % names.Length] + (i % 37 >= names.Length ? "x" + (i % 37) : "");
+            return new UserBenchmarkDto { MinAge = 18 + i % 29, MaxAge = 40 + i % 31, Status = "Active", FullName = name, SortBy = nameof(BenchmarkUser.CreatedAt), IsDescending = true, Page = 2, PageSize = 20 };
+        }
+
+        static List<BenchmarkUser> Qryx(PostgresBenchmarkDbContext db, UserBenchmarkDto dto)
+        {
+            var q = FilterBuilder.Apply(db.Users.AsNoTracking(), dto);
+            q = SortBuilder.Apply(q, dto);
+            return PaginationBuilder.ApplyOffset(q, dto).ToList();
+        }
+
+        static List<BenchmarkUser> Gridify(PostgresBenchmarkDbContext db, UserBenchmarkDto dto) =>
+            db.Users.AsNoTracking()
+                .ApplyFiltering($"Age >= {dto.MinAge}, Age <= {dto.MaxAge}, Status=Active, (FirstName ^ {dto.FullName}|LastName ^ {dto.FullName})")
+                .ApplyOrdering("CreatedAt desc")
+                .ApplyPaging(2, 20)
+                .ToList();
+
+        // Hand-written, fixed-shape compiled query: the lower bound EF Core itself allows (reference only)
+        var compiled = EF.CompileQuery((PostgresBenchmarkDbContext db, int min, int max, string status, string name) =>
+            db.Users.AsNoTracking()
+                .Where(u => u.Status == status && u.Age >= min && u.Age <= max && (u.FirstName.StartsWith(name) || u.LastName.StartsWith(name)))
+                .OrderByDescending(u => u.CreatedAt)
+                .Skip(20)
+                .Take(20));
+
+        foreach (var unique in new[] { false, true })
+        {
+            Console.WriteLine(unique
+                ? "      -- Unique filter values per request (realistic API traffic)"
+                : "      -- Fixed filter values (same request repeated)");
+
+            // Both contexts share one EF model and therefore ONE compiled-query cache. Every case walks its own,
+            // disjoint value range (offset k * 5,000 inside the 33,263-combination cycle; a case uses < 600 values),
+            // otherwise "Gridify + Auto Prepare" would reuse queries "Gridify" had already compiled.
+            PrintResultsTable(MeasureInterleaved(70, rounds: 7, warmup: 100,
+                ("Qryx", i => Qryx(plainDb, Request(i, unique, names))),
+                ("Qryx + Auto Prepare", i => Qryx(preparedDb, Request(i + 5_000, unique, names))),
+                ("Gridify", i => Gridify(plainDb, Request(i + 10_000, unique, names))),
+                ("Gridify + Auto Prepare", i => Gridify(preparedDb, Request(i + 15_000, unique, names))),
+                ("EF.CompileQuery + Auto Prepare (ref)", i =>
+                {
+                    var r = Request(i + 20_000, unique, names);
+                    return compiled(preparedDb, r.MinAge!.Value, r.MaxAge!.Value, r.Status!, r.FullName!).ToList();
+                })));
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("  (ref) = hand-written fixed-shape LINQ compiled with EF.CompileQuery: the EF Core ceiling, not a Qryx feature.");
+        Console.WriteLine("  Auto Prepare reuses PostgreSQL's parsed/planned statement only for an identical SQL text: Qryx's parameterized");
+        Console.WriteLine("  SQL stays identical across values, Gridify's inlined literals change the SQL text on every new value.");
+        Console.ResetColor();
+    }
+
+    /// <summary>
+    /// Fair sequential measurement: every case is warmed up past tiered JIT first, then measured in
+    /// <paramref name="rounds"/> rounds whose order rotates each round (no framework always runs first/last
+    /// and inherits shared EF Core JIT/GC state). Reports the median round per case.
+    /// </summary>
+    private static List<BenchmarkMetric> MeasureInterleaved(
+        int iterationsPerRound,
+        int rounds,
+        int warmup,
+        params (string Name, Func<int, object> Action)[] cases)
+    {
+        var counters = new int[cases.Length];
+        for (int c = 0; c < cases.Length; c++)
+        {
+            for (int i = 0; i < warmup; i++)
+                cases[c].Action(counters[c]++);
+        }
+
+        var times = cases.Select(_ => new List<double>(rounds)).ToArray();
+        var allocs = cases.Select(_ => new List<long>(rounds)).ToArray();
+
+        for (int r = 0; r < rounds; r++)
+        {
+            for (int k = 0; k < cases.Length; k++)
+            {
+                int c = (k + r) % cases.Length; // rotate start position every round
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                long startBytes = GC.GetAllocatedBytesForCurrentThread();
+                var sw = Stopwatch.StartNew();
+                for (int i = 0; i < iterationsPerRound; i++)
+                    cases[c].Action(counters[c]++);
+                sw.Stop();
+
+                times[c].Add(sw.Elapsed.TotalNanoseconds / iterationsPerRound);
+                allocs[c].Add((GC.GetAllocatedBytesForCurrentThread() - startBytes) / iterationsPerRound);
+            }
+        }
+
+        var metrics = new List<BenchmarkMetric>(cases.Length);
+        for (int c = 0; c < cases.Length; c++)
+        {
+            times[c].Sort();
+            allocs[c].Sort();
+            var medianNs = times[c][rounds / 2];
+            metrics.Add(new BenchmarkMetric(cases[c].Name, medianNs, 1_000_000_000.0 / medianNs, allocs[c][rounds / 2], 0, 0, 0)
+            {
+                MinNsPerOp = times[c][0],
+                MaxNsPerOp = times[c][^1]
+            });
+        }
+
+        return metrics;
+    }
+
+    private static List<BenchmarkMetric> MeasureInterleaved(
+        int iterationsPerRound,
+        int rounds,
+        int warmup,
+        params (string Name, Func<object> Action)[] cases)
+    {
+        return MeasureInterleaved(iterationsPerRound, rounds, warmup,
+            cases.Select(c => (c.Name, (Func<int, object>)(_ => c.Action()))).ToArray());
+    }
+
+    /// <summary>Parallel variant of <see cref="MeasureInterleaved(int,int,int,ValueTuple{string,Func{int,object}}[])"/>.</summary>
+    private static List<BenchmarkMetric> MeasureParallelInterleaved(
+        int opsPerRound,
+        int rounds,
+        params (string Name, Action Action)[] cases)
+    {
+        foreach (var c in cases)
+        {
+            // Single-threaded first: some libraries (OData's ODataQueryContext) lazily initialize
+            // shared state in a non-thread-safe way on first use.
+            for (int i = 0; i < 100; i++)
+                c.Action();
+
+            Parallel.For(0, 2_000, _ => c.Action());
+        }
+
+        var times = cases.Select(_ => new List<double>(rounds)).ToArray();
+        var allocs = cases.Select(_ => new List<long>(rounds)).ToArray();
+
+        for (int r = 0; r < rounds; r++)
+        {
+            for (int k = 0; k < cases.Length; k++)
+            {
+                int c = (k + r) % cases.Length;
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                long startBytes = GC.GetTotalAllocatedBytes(precise: true);
+                var sw = Stopwatch.StartNew();
+                Parallel.For(0, opsPerRound, _ => cases[c].Action());
+                sw.Stop();
+
+                times[c].Add(sw.Elapsed.TotalNanoseconds / opsPerRound);
+                allocs[c].Add((GC.GetTotalAllocatedBytes(precise: true) - startBytes) / opsPerRound);
+            }
+        }
+
+        var metrics = new List<BenchmarkMetric>(cases.Length);
+        for (int c = 0; c < cases.Length; c++)
+        {
+            times[c].Sort();
+            allocs[c].Sort();
+            var medianNs = times[c][rounds / 2];
+            metrics.Add(new BenchmarkMetric(cases[c].Name, medianNs, 1_000_000_000.0 / medianNs, allocs[c][rounds / 2], 0, 0, 0)
+            {
+                MinNsPerOp = times[c][0],
+                MaxNsPerOp = times[c][^1]
+            });
+        }
+
+        return metrics;
+    }
+
+    /// <summary>
+    /// Runs only the FILTER part of every framework (no sorting/paging, so CreatedAt ties cannot cause false
+    /// mismatches) and checks that all of them select exactly the same rows.
+    /// </summary>
+    private static void VerifyFilterParity(
+        IQueryable<BenchmarkUser> source,
+        UserBenchmarkDto qryxDto,
+        string gridifyFilter,
+        SieveModel sieveModel,
+        BenchmarkSieveProcessor sieveProcessor,
+        ODataQueryContext odataContext,
+        IServiceProvider odataServices,
+        string odataQuery)
+    {
+        var odataFilterOnly = odataQuery.Split('&')[0]; // "?$filter=..."
+        var odataOptions = BenchmarkDataHelper.CreateODataOptions(odataContext, odataServices, odataFilterOnly);
+
+        VerifySameRows(
+            ("Qryx", FilterBuilder.Apply(source, qryxDto).Select(u => u.Id).ToList()),
+            ("Gridify", source.ApplyFiltering(gridifyFilter).Select(u => u.Id).ToList()),
+            ("Sieve", sieveProcessor.Apply(sieveModel, source, applySorting: false, applyPagination: false).Select(u => u.Id).ToList()),
+            ("OData", ((IQueryable<BenchmarkUser>)odataOptions.ApplyTo(source)).Select(u => u.Id).ToList()));
+    }
+
+    /// <summary>
+    /// Semantic check: every framework's filter must match exactly the same rows (ID set), otherwise
+    /// the timings compare different queries (e.g. Gridify "=*" is Contains, not StartsWith).
+    /// </summary>
+    private static void VerifySameRows(params (string Name, IEnumerable<int> Ids)[] results)
+    {
+        var baseline = results[0].Ids.Order().ToArray();
+        var ok = true;
+        foreach (var (name, ids) in results.Skip(1))
+        {
+            var actual = ids.Order().ToArray();
+            if (!actual.SequenceEqual(baseline))
+            {
+                ok = false;
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"      [Verification FAILED] {name}: {actual.Length} rows, {results[0].Name}: {baseline.Length} rows -> different filter semantics!");
+                Console.ResetColor();
+            }
+        }
+
+        if (ok)
+        {
+            Console.WriteLine($"      [Verification] All {results.Length} frameworks match the same {baseline.Length} rows (filter semantics identical)");
+        }
     }
 
     private static BenchmarkMetric MeasureMetric(string name, int iterations, Func<object> action)
@@ -590,17 +827,22 @@ public static class FastDiagnosticRunner
     {
         var baseline = metrics.First();
 
-        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+");
-        Console.WriteLine("| Framework                        | Time/Op     | Speed Ratio   | Ops / Sec    | Allocated  |");
-        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+");
+        static string FormatTime(double ns) => ns < 1000
+            ? $"{ns:F1} ns"
+            : ns < 1_000_000
+                ? $"{ns / 1000.0:F2} μs"
+                : $"{ns / 1_000_000.0:F2} ms";
+
+        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+-------------------------+");
+        Console.WriteLine("| Framework                        | Time/Op     | Speed Ratio   | Ops / Sec    | Allocated  | Noise (min..max round)  |");
+        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+-------------------------+");
 
         foreach (var m in metrics)
         {
-            string timeStr = m.NsPerOp < 1000
-                ? $"{m.NsPerOp:F1} ns"
-                : m.NsPerOp < 1_000_000
-                    ? $"{m.NsPerOp / 1000.0:F2} μs"
-                    : $"{m.NsPerOp / 1_000_000.0:F2} ms";
+            string timeStr = FormatTime(m.NsPerOp);
+            string noiseStr = m.MinNsPerOp.HasValue && m.MaxNsPerOp.HasValue
+                ? $"{FormatTime(m.MinNsPerOp.Value)}..{FormatTime(m.MaxNsPerOp.Value)}"
+                : "-";
 
             double ratio = m.NsPerOp / baseline.NsPerOp;
             string ratioStr = Math.Abs(ratio - 1.0) < 0.05 ? "1.00x (Base)" : $"{ratio:F2}x slower";
@@ -622,11 +864,12 @@ public static class FastDiagnosticRunner
                 Console.ResetColor();
             }
 
-            Console.WriteLine($"| {m.Name,-32} | {timeStr,11} | {ratioStr,13} | {opsStr,12} | {allocStr,10} |");
+            Console.WriteLine($"| {m.Name,-32} | {timeStr,11} | {ratioStr,13} | {opsStr,12} | {allocStr,10} | {noiseStr,-23} |");
             Console.ResetColor();
         }
 
-        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+");
+        Console.WriteLine("+----------------------------------+-------------+---------------+--------------+------------+-------------------------+");
+        Console.WriteLine("  Time/Op = median of interleaved rounds (round order rotates; every case warmed up past tiered JIT).");
     }
 }
 
@@ -637,4 +880,9 @@ public record BenchmarkMetric(
     long BytesPerOp,
     int Gen0,
     int Gen1,
-    int Gen2);
+    int Gen2)
+{
+    /// <summary>Fastest / slowest measured round (interleaved runs only), to show the noise band.</summary>
+    public double? MinNsPerOp { get; init; }
+    public double? MaxNsPerOp { get; init; }
+}
