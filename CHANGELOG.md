@@ -2,9 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). All seven packages are versioned together.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). All packages share one version line; a release publishes only the packages whose source changed since the previous tag.
 
 ## [Unreleased]
+
+## [2.1.0] - 2026-11-04
+
+Published packages: `Qryx.Core`, `Qryx.Expressions`, `Qryx.EntityFramework`, `Qryx.AspNetCore`, `Qryx.Swashbuckle`. `Qryx.OpenApi` and `Qryx.SourceGenerator` are unchanged and stay at 2.0.0 (they work with 2.1.0).
 
 ### Added
 
@@ -75,7 +79,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Minimal API and MVC model binding, Swashbuckle and .NET 10 OpenAPI integration.
 - Optional `TagWith` query tagging, `In`-list size limit, Roslyn source generator, sample API and benchmark suite.
 
-[Unreleased]: https://github.com/0605AbMu/qryx/compare/2.0.0...HEAD
+[Unreleased]: https://github.com/0605AbMu/qryx/compare/2.1.0...HEAD
+[2.1.0]: https://github.com/0605AbMu/qryx/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/0605AbMu/qryx/compare/1.0.1...2.0.0
 [1.0.1]: https://github.com/0605AbMu/qryx/compare/1.0.0...1.0.1
 [1.0.0]: https://github.com/0605AbMu/qryx/releases/tag/1.0.0
