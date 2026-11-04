@@ -7,6 +7,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Qryx.Tests/Qryx.Tests.csproj" />
+    <Project Path="tests/Qryx.EntityFramework.Tests/Qryx.EntityFramework.Tests.csproj" />
+    <Project Path="tests/Qryx.AspNetCore.Tests/Qryx.AspNetCore.Tests.csproj" />
+    <Project Path="tests/Qryx.SourceGenerator.Tests/Qryx.SourceGenerator.Tests.csproj" />
+    <Project Path="tests/Qryx.ApiDocs.Tests/Qryx.ApiDocs.Tests.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Qryx.AspNetCore/Qryx.AspNetCore.csproj" />
