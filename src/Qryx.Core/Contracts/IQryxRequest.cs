@@ -6,13 +6,26 @@ namespace Qryx.Core.Contracts;
 /// </summary>
 public interface IQryxRequest
 {
+    /// <summary>1-based page number for offset pagination (ignored when <see cref="AfterCursor"/> is set).</summary>
     int Page { get; }
+
+    /// <summary>Requested page size (clamped to <c>QryxOptions.MaxPageSize</c>).</summary>
     int PageSize { get; }
+
+    /// <summary>Opaque keyset cursor from a previous response's <c>nextCursor</c>; switches to keyset pagination.</summary>
     object? AfterCursor { get; }
-    string? CursorProperty => null;
+
+    /// <summary>Comma-separated sort clauses, e.g. <c>"createdAt desc, name"</c> (only [Sortable] properties).</summary>
     string? SortBy { get; }
+
+    /// <summary>Default direction for sort clauses without an explicit <c>asc</c>/<c>desc</c>.</summary>
     bool IsDescending { get; }
-    bool IncludeTotalCount => true;
+
+    /// <summary>
+    /// When true, the response also carries the total number of matching rows (<c>total</c>).
+    /// Off by default: counting is the most expensive part of paging. Ignored for DTOs marked with <c>[NoTotal]</c>.
+    /// </summary>
+    bool IncludeTotal => false;
 }
 
 /// <summary>
@@ -25,40 +38,43 @@ public interface IQryxRequest<TEntity> : IQryxRequest
     new int Page { get; init; }
     new int PageSize { get; init; }
     new object? AfterCursor { get; init; }
-    new string? CursorProperty => null;
     new string? SortBy { get; init; }
     new bool IsDescending { get; init; }
-    new bool IncludeTotalCount => true;
+    new bool IncludeTotal => false;
 
     int IQryxRequest.Page => Page;
     int IQryxRequest.PageSize => PageSize;
     object? IQryxRequest.AfterCursor => AfterCursor;
-    string? IQryxRequest.CursorProperty => CursorProperty;
     string? IQryxRequest.SortBy => SortBy;
     bool IQryxRequest.IsDescending => IsDescending;
-    bool IQryxRequest.IncludeTotalCount => IncludeTotalCount;
+    bool IQryxRequest.IncludeTotal => IncludeTotal;
 }
 
 /// <summary>
 /// Base record for Qryx query requests.
-/// Properties are nullable to support optional query string binding in Minimal APIs
-/// while defaulting to standard values (Page=1, PageSize=20, IsDescending=false).
+/// Properties are nullable so every query string parameter is optional in Minimal APIs and OpenAPI
+/// while defaulting to standard values (Page=1, PageSize=20, IsDescending=false, IncludeTotal=false).
 /// </summary>
 /// <typeparam name="TEntity">Target entity type.</typeparam>
 public abstract record QryxRequest<TEntity> : IQryxRequest<TEntity>
 {
+    /// <summary>1-based page number for offset pagination. Default: 1.</summary>
     public int? Page { get; init; } = 1;
+
+    /// <summary>Items per page. Default: 20, clamped to <c>QryxOptions.MaxPageSize</c>.</summary>
     public int? PageSize { get; init; } = 20;
+
+    /// <summary>Opaque cursor from the previous response's <c>nextCursor</c> (keyset pagination).</summary>
     public string? AfterCursor { get; init; }
-    public string? CursorProperty { get; init; }
+
+    /// <summary>Sort clauses, e.g. <c>"createdAt desc, name"</c>. Only [Sortable] properties are allowed.</summary>
     public string? SortBy { get; init; }
+
+    /// <summary>Default sort direction for clauses without <c>asc</c>/<c>desc</c>. Default: false.</summary>
     public bool? IsDescending { get; init; } = false;
 
-    /// <summary>
-    /// When true (default), executes CountAsync() to provide Total count.
-    /// When false or when AfterCursor is used, skips CountAsync() for a single fast database roundtrip.
-    /// </summary>
-    public bool? IncludeTotalCount { get; init; } = true;
+    /// <summary>Also return the total number of matching rows. Default: false.</summary>
+    public bool? IncludeTotal { get; init; }
 
     int IQryxRequest<TEntity>.Page
     {
@@ -74,11 +90,10 @@ public abstract record QryxRequest<TEntity> : IQryxRequest<TEntity>
 
     object? IQryxRequest<TEntity>.AfterCursor
     {
-        get => AfterCursor;
+        // Bo'sh "?afterCursor=" keyset rejimini yoqmaydi (offset sahifalash ishlaydi)
+        get => string.IsNullOrWhiteSpace(AfterCursor) ? null : AfterCursor;
         init => AfterCursor = value?.ToString();
     }
-
-    string? IQryxRequest<TEntity>.CursorProperty => CursorProperty;
 
     bool IQryxRequest<TEntity>.IsDescending
     {
@@ -86,5 +101,5 @@ public abstract record QryxRequest<TEntity> : IQryxRequest<TEntity>
         init => IsDescending = value;
     }
 
-    bool IQryxRequest<TEntity>.IncludeTotalCount => IncludeTotalCount ?? true;
+    bool IQryxRequest<TEntity>.IncludeTotal => IncludeTotal ?? false;
 }
