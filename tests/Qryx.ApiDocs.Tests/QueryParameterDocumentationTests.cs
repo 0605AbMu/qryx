@@ -25,8 +25,10 @@ public sealed class QueryParameterDocumentationTests(ApiDocsHost host) : IClassF
     {
         { ApiDocsHost.SwaggerPath, "/minimal/people" },
         { ApiDocsHost.SwaggerPath, "/mvc/people" },
+#if NET10_0_OR_GREATER // Qryx.OpenApi (Microsoft.AspNetCore.OpenApi transformers) targets net10.0 only
         { ApiDocsHost.OpenApiPath, "/minimal/people" },
         { ApiDocsHost.OpenApiPath, "/mvc/people" }
+#endif
     };
 
     /// <summary>(document, endpoint, isMvc) for the <see cref="PersonQuery"/> endpoints.</summary>
@@ -34,8 +36,10 @@ public sealed class QueryParameterDocumentationTests(ApiDocsHost host) : IClassF
     {
         { ApiDocsHost.SwaggerPath, "/minimal/people", false },
         { ApiDocsHost.SwaggerPath, "/mvc/people", true },
+#if NET10_0_OR_GREATER // Qryx.OpenApi (Microsoft.AspNetCore.OpenApi transformers) targets net10.0 only
         { ApiDocsHost.OpenApiPath, "/minimal/people", false },
         { ApiDocsHost.OpenApiPath, "/mvc/people", true }
+#endif
     };
 
     /// <summary>(document, endpoint) for the <c>[NoTotal]</c> <see cref="PersonFastQuery"/> endpoints.</summary>
@@ -43,11 +47,19 @@ public sealed class QueryParameterDocumentationTests(ApiDocsHost host) : IClassF
     {
         { ApiDocsHost.SwaggerPath, "/minimal/people/fast" },
         { ApiDocsHost.SwaggerPath, "/mvc/people/fast" },
+#if NET10_0_OR_GREATER // Qryx.OpenApi (Microsoft.AspNetCore.OpenApi transformers) targets net10.0 only
         { ApiDocsHost.OpenApiPath, "/minimal/people/fast" },
         { ApiDocsHost.OpenApiPath, "/mvc/people/fast" }
+#endif
     };
 
-    public static TheoryData<string> Documents => new() { ApiDocsHost.SwaggerPath, ApiDocsHost.OpenApiPath };
+    public static TheoryData<string> Documents => new()
+    {
+        ApiDocsHost.SwaggerPath,
+#if NET10_0_OR_GREATER
+        ApiDocsHost.OpenApiPath
+#endif
+    };
 
     [Theory]
     [MemberData(nameof(PersonEndpoints))]

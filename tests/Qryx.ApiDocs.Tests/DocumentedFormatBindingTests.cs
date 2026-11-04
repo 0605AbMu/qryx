@@ -27,8 +27,10 @@ public sealed class DocumentedFormatBindingTests(ApiDocsHost host) : IClassFixtu
     [Theory]
     [InlineData(ApiDocsHost.SwaggerPath, "/minimal/people")]
     [InlineData(ApiDocsHost.SwaggerPath, "/mvc/people")]
+#if NET10_0_OR_GREATER // Qryx.OpenApi (Microsoft.AspNetCore.OpenApi transformers) targets net10.0 only
     [InlineData(ApiDocsHost.OpenApiPath, "/minimal/people")]
     [InlineData(ApiDocsHost.OpenApiPath, "/mvc/people")]
+#endif
     public async Task DocumentedExamples_AreAccepted(string documentPath, string endpoint)
     {
         var document = await host.GetDocumentAsync(documentPath);

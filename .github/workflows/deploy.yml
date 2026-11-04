@@ -22,10 +22,12 @@ jobs:
         with:
           fetch-depth: 0 # Full git history needed for tag comparison & folder scan
 
-      - name: Setup .NET 10 SDK
+      - name: Setup .NET 8 and .NET 10 SDKs
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Cache NuGet Global Packages
         uses: actions/cache@v4

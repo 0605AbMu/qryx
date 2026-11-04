@@ -11,7 +11,9 @@ using Qryx.AspNetCore.Extensions;
 using Qryx.EntityFramework.Extensions;
 using Qryx.EntityFramework.Models;
 using Qryx.Expressions.Options;
+#if NET10_0_OR_GREATER
 using Qryx.OpenApi.Extensions;
+#endif
 using Qryx.Swashbuckle.Extensions;
 
 namespace Qryx.ApiDocs.Tests.Infrastructure;
@@ -62,7 +64,9 @@ public sealed class ApiDocsHost : IAsyncLifetime
         builder.Services.AddControllers().AddApplicationPart(typeof(ApiDocsHost).Assembly);
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen(o => o.AddQryxFilters());
+#if NET10_0_OR_GREATER
         builder.Services.AddOpenApi(o => o.AddQryxTransformers());
+#endif
 
         var app = builder.Build();
         using (var scope = app.Services.CreateScope())
@@ -73,7 +77,9 @@ public sealed class ApiDocsHost : IAsyncLifetime
         }
 
         app.UseSwagger();
+#if NET10_0_OR_GREATER
         app.MapOpenApi();
+#endif
         app.MapControllers();
 
         app.MapGet("/minimal/people", async ([AsParameters] PersonQuery query, PeopleDbContext db, CancellationToken ct) =>
