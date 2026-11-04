@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -10,448 +9,125 @@ using Microsoft.CodeAnalysis.Text;
 namespace Qryx.SourceGenerator;
 
 /// <summary>
-/// Incremental Roslyn Source Generator for Qryx query DTOs.
-/// Generates compile-time strongly-typed IQueryable filter methods with 0.00 ns reflection.
-/// Fully database-provider agnostic.
+/// Incremental Roslyn source generator for Qryx query DTOs.
+/// For every DTO with [Filter] properties or implementing <c>IQryxRequest&lt;TEntity&gt;</c> it emits
+/// <c>Qryx.Generated.QryxGeneratedExtensions.ApplyGenerated(this IQueryable&lt;TEntity&gt;, TDto)</c>
+/// with plain typed lambdas over captured locals (SQL parameters, zero reflection), followed by sorting and pagination.
 /// </summary>
-[Generator]
-public class QryxIncrementalGenerator : IIncrementalGenerator
+[Generator(LanguageNames.CSharp)]
+public sealed class QryxIncrementalGenerator : IIncrementalGenerator
 {
-    private static readonly string[] RangePrefixes = new[] { "Min", "Max", "From", "To" };
+    /// <summary>Tracking names of the pipeline steps (used by incremental caching tests).</summary>
+    public static class TrackingNames
+    {
+        public const string FilterTypes = "QryxFilterTypes";
+        public const string RequestTypes = "QryxRequestTypes";
+        public const string Models = "QryxModels";
+        public const string Features = "QryxFeatures";
+        public const string Diagnostics = "QryxDiagnostics";
+    }
 
+    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var classDeclarations = context.SyntaxProvider
+        // 1. Types that declare [Filter] properties (including record primary-constructor [property: Filter]).
+        var filterTypes = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ModelBuilder.FilterAttributeMetadataName,
+                predicate: static (node, _) => node is PropertyDeclarationSyntax or ParameterSyntax,
+                transform: static (ctx, ct) =>
+                {
+                    var containingType = ctx.TargetSymbol switch
+                    {
+                        IPropertySymbol property => property.ContainingType,
+                        IParameterSymbol parameter => parameter.ContainingSymbol?.ContainingType,
+                        _ => null
+                    };
+
+                    return containingType is null ? null : ModelBuilder.Build(containingType, ctx.SemanticModel.Compilation, ct);
+                })
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .WithTrackingName(TrackingNames.FilterTypes);
+
+        // 2. Request types (QryxRequest<T> / IQryxRequest<T>) without own [Filter] properties: sorting + pagination.
+        var requestTypes = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: static (s, _) => IsCandidateClass(s),
-                transform: static (ctx, _) => GetClassSemantic(ctx))
-            .Where(static m => m is not null);
+                predicate: static (node, _) => node is TypeDeclarationSyntax { BaseList: not null } and not InterfaceDeclarationSyntax,
+                transform: static (ctx, ct) =>
+                {
+                    if (ctx.SemanticModel.GetDeclaredSymbol(ctx.Node, ct) is not INamedTypeSymbol type ||
+                        !ModelBuilder.ImplementsRequest(type))
+                    {
+                        return null;
+                    }
 
-        var compilationAndClasses = context.CompilationProvider.Combine(classDeclarations.Collect());
+                    return ModelBuilder.Build(type, ctx.SemanticModel.Compilation, ct);
+                })
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .WithTrackingName(TrackingNames.RequestTypes);
 
-        context.RegisterSourceOutput(compilationAndClasses, static (spc, source) =>
+        // 3. One model per DTO (partial declarations and both sources are de-duplicated by metadata name).
+        var results = filterTypes.Collect()
+            .Combine(requestTypes.Collect())
+            .SelectMany(static (pair, _) => Distinct(pair.Left, pair.Right));
+
+        // Code generation depends only on the location-free model; diagnostics are a separate branch.
+        var models = results
+            .Select(static (result, _) => result.Model)
+            .WithTrackingName(TrackingNames.Models);
+
+        var diagnostics = results
+            .Select(static (result, _) => result.Diagnostics)
+            .Where(static d => !d.IsEmpty)
+            .WithTrackingName(TrackingNames.Diagnostics);
+
+        var features = context.CompilationProvider
+            .Select(static (compilation, _) => DetectFeatures(compilation))
+            .WithTrackingName(TrackingNames.Features);
+
+        context.RegisterSourceOutput(models.Combine(features), static (spc, source) => Execute(spc, source.Left, source.Right));
+
+        context.RegisterSourceOutput(diagnostics, static (spc, items) =>
         {
-            var (compilation, classes) = source;
-            if (classes.IsDefaultOrEmpty)
-                return;
-
-            GenerateSource(spc, classes!);
+            foreach (var diagnostic in items)
+                spc.ReportDiagnostic(diagnostic);
         });
     }
 
-    private static bool IsCandidateClass(SyntaxNode node)
+    private static ImmutableArray<DtoResult> Distinct(ImmutableArray<DtoResult> first, ImmutableArray<DtoResult> second)
     {
-        if (node is ClassDeclarationSyntax or RecordDeclarationSyntax)
+        var seen = new HashSet<string>();
+        var builder = ImmutableArray.CreateBuilder<DtoResult>(first.Length + second.Length);
+
+        foreach (var result in first.Concat(second).OrderBy(static r => r.Model.Key, System.StringComparer.Ordinal))
         {
-            var typeDecl = (TypeDeclarationSyntax)node;
-            return typeDecl.Members.OfType<PropertyDeclarationSyntax>().Any();
+            if (seen.Add(result.Model.Key))
+                builder.Add(result);
         }
-        return false;
+
+        return builder.ToImmutable();
     }
 
-    private static INamedTypeSymbol? GetClassSemantic(GeneratorSyntaxContext context)
+    private static CompilationFeatures DetectFeatures(Compilation compilation)
     {
-        if (context.Node is not TypeDeclarationSyntax typeDecl)
-            return null;
+        var npgsql = compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.NpgsqlDbFunctionsExtensions");
+        var hasILike = npgsql is not null && npgsql.GetMembers("ILike")
+            .OfType<IMethodSymbol>()
+            .Any(static m => m.Parameters.Length == 4);
 
-        if (context.SemanticModel.GetDeclaredSymbol(typeDecl) is not INamedTypeSymbol symbol)
-            return null;
+        var efQueryable = compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions");
+        var hasTagWith = efQueryable is not null && !efQueryable.GetMembers("TagWith").IsEmpty;
 
-        // Check if any property has [Filter] attribute or type inherits from IQryxRequest
-        var hasFilterAttr = symbol.GetMembers().OfType<IPropertySymbol>().Any(p =>
-            p.GetAttributes().Any(a => a.AttributeClass?.Name is "FilterAttribute" or "Filter"));
-
-        if (hasFilterAttr)
-            return symbol;
-
-        var implementsQryx = symbol.AllInterfaces.Any(i => i.Name == "IQryxRequest") ||
-                             (symbol.BaseType is not null && symbol.BaseType.Name.StartsWith("QryxRequest"));
-
-        return implementsQryx ? symbol : null;
+        return new CompilationFeatures(hasILike, hasTagWith);
     }
 
-    private static void GenerateSource(SourceProductionContext spc, ImmutableArray<INamedTypeSymbol> classes)
+    private static void Execute(SourceProductionContext context, DtoModel model, CompilationFeatures features)
     {
-        var distinctClasses = classes.Distinct(SymbolEqualityComparer.Default).Cast<INamedTypeSymbol>().ToList();
+        if (model.EmitKind == DtoEmitKind.None)
+            return;
 
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated/>");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine("using System;");
-        sb.AppendLine("using System.Linq;");
-        sb.AppendLine("using System.Linq.Expressions;");
-        sb.AppendLine("using System.Reflection;");
-        sb.AppendLine();
-        sb.AppendLine("namespace Qryx.Generated");
-        sb.AppendLine("{");
-        sb.AppendLine("    public static class QryxGeneratedExtensions");
-        sb.AppendLine("    {");
-        sb.AppendLine("        private static readonly MethodInfo StartsWithMethod =");
-        sb.AppendLine("            typeof(string).GetMethod(nameof(string.StartsWith), new[] { typeof(string) })!;");
-        sb.AppendLine("        private static readonly MethodInfo EndsWithMethod =");
-        sb.AppendLine("            typeof(string).GetMethod(nameof(string.EndsWith), new[] { typeof(string) })!;");
-        sb.AppendLine("        private static readonly MethodInfo ContainsMethod =");
-        sb.AppendLine("            typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;");
-        sb.AppendLine();
-
-        // Collect all distinct (Entity, TargetProperty) pairs to generate static PropertyInfo caches
-        var staticProps = new HashSet<string>();
-
-        foreach (var classSymbol in distinctClasses)
-        {
-            var className = classSymbol.Name;
-            var classNamespace = classSymbol.ContainingNamespace.ToDisplayString();
-            var fullClassName = $"{classNamespace}.{className}";
-
-            // Find entity type symbol from QryxRequest<TEntity>
-            ITypeSymbol? entityTypeSymbol = null;
-            var baseType = classSymbol.BaseType;
-            while (baseType != null)
-            {
-                if (baseType.Name.StartsWith("QryxRequest") && baseType.TypeArguments.Length == 1)
-                {
-                    entityTypeSymbol = baseType.TypeArguments[0];
-                    break;
-                }
-                baseType = baseType.BaseType;
-            }
-
-            if (entityTypeSymbol == null)
-            {
-                foreach (var iface in classSymbol.AllInterfaces)
-                {
-                    if (iface.Name.StartsWith("IQryxRequest") && iface.TypeArguments.Length == 1)
-                    {
-                        entityTypeSymbol = iface.TypeArguments[0];
-                        break;
-                    }
-                }
-            }
-
-            var implementsQryx = classSymbol.AllInterfaces.Any(i => i.Name.StartsWith("IQryxRequest")) ||
-                                 (classSymbol.BaseType is not null && classSymbol.BaseType.Name.StartsWith("QryxRequest"));
-
-            if (entityTypeSymbol != null)
-            {
-                var typeParam = entityTypeSymbol.ToDisplayString();
-                var safeClassIdent = className;
-
-                // Process properties with [Filter] sorted by short-circuit operator priority
-                var filterProps = classSymbol.GetMembers().OfType<IPropertySymbol>()
-                    .Select(p => new
-                    {
-                        Prop = p,
-                        Attr = p.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name is "FilterAttribute" or "Filter")
-                    })
-                    .Where(x => x.Attr != null)
-                    .Select(x => new
-                    {
-                        x.Prop,
-                        x.Attr,
-                        Op = GetOperator(x.Attr!),
-                        TargetProps = GetTargetProperties(x.Prop, x.Attr!)
-                    })
-                    .OrderBy(x => GetOperatorPriority(x.Op, x.Prop))
-                    .ToList();
-
-                // Static PropertyInfo definitions for 0.00 ns reflection
-                foreach (var item in filterProps)
-                {
-                    foreach (var target in item.TargetProps)
-                    {
-                        if (!target.Contains("."))
-                        {
-                            var propField = $"Prop_{safeClassIdent}_{target}";
-                            if (staticProps.Add(propField))
-                            {
-                                sb.AppendLine($"        private static readonly PropertyInfo? {propField} =");
-                                sb.AppendLine($"            typeof({typeParam}).GetProperty(\"{target}\", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);");
-                            }
-                        }
-                    }
-                }
-                sb.AppendLine();
-
-                sb.AppendLine($"        /// <summary>");
-                sb.AppendLine($"        /// Compile-time fast filter generator for {className} with 0.00 ns reflection.");
-                sb.AppendLine($"        /// </summary>");
-                sb.AppendLine($"        public static IQueryable<{typeParam}> ApplyGenerated(this IQueryable<{typeParam}> query, {fullClassName} request)");
-                sb.AppendLine($"        {{");
-                sb.AppendLine($"            if (request == null) return query;");
-                sb.AppendLine();
-                sb.AppendLine($"            var p = Expression.Parameter(typeof({typeParam}), \"x\");");
-                sb.AppendLine($"            Expression? body = null;");
-                sb.AppendLine();
-
-                foreach (var item in filterProps)
-                {
-                    GenerateFastExpressionFilterLogic(sb, safeClassIdent, typeParam, item.Prop, item.Op, item.TargetProps);
-                }
-
-                sb.AppendLine();
-                sb.AppendLine($"            if (body != null)");
-                sb.AppendLine($"            {{");
-                sb.AppendLine($"                query = query.Where(Expression.Lambda<Func<{typeParam}, bool>>(body, p));");
-                sb.AppendLine($"            }}");
-
-                if (implementsQryx)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"            if (request is Qryx.Core.Contracts.IQryxRequest<{typeParam}> req)");
-                    sb.AppendLine($"            {{");
-                    sb.AppendLine($"                query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req, false);");
-                    sb.AppendLine($"                if (req.AfterCursor != null)");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, req.AfterCursor, req.PageSize, req.CursorProperty, req.IsDescending);");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine($"                else");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, req);");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine($"            }}");
-                }
-
-                sb.AppendLine();
-                sb.AppendLine($"            return query;");
-                sb.AppendLine($"        }}");
-                sb.AppendLine();
-            }
-            else
-            {
-                sb.AppendLine($"        public static IQueryable<TEntity> ApplyGenerated<TEntity>(this IQueryable<TEntity> query, {fullClassName} request)");
-                sb.AppendLine($"        {{");
-                sb.AppendLine($"            if (request == null) return query;");
-                sb.AppendLine($"            query = Qryx.Expressions.Builders.FilterBuilder.Apply(query, request);");
-                if (implementsQryx)
-                {
-                    sb.AppendLine($"            if (request is Qryx.Core.Contracts.IQryxRequest<TEntity> req)");
-                    sb.AppendLine($"            {{");
-                    sb.AppendLine($"                if (!string.IsNullOrWhiteSpace(req.SortBy))");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.Apply(query, req.SortBy, req.IsDescending, false, req.GetType());");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine($"                else");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.SortBuilder.EnsureOrdering(query, req.IsDescending);");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine();
-                    sb.AppendLine($"                if (req.AfterCursor != null)");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyKeyset(query, req.AfterCursor, req.PageSize, req.CursorProperty, req.IsDescending);");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine($"                else");
-                    sb.AppendLine($"                {{");
-                    sb.AppendLine($"                    query = Qryx.Expressions.Builders.PaginationBuilder.ApplyOffset(query, req.Page, req.PageSize);");
-                    sb.AppendLine($"                }}");
-                    sb.AppendLine($"            }}");
-                }
-                sb.AppendLine($"            return query;");
-                sb.AppendLine($"        }}");
-                sb.AppendLine();
-            }
-        }
-
-        sb.AppendLine("    }");
-        sb.AppendLine("}");
-
-        spc.AddSource("QryxGeneratedExtensions.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
-    }
-
-    private static int GetOperator(AttributeData filterAttr)
-    {
-        if (filterAttr.ConstructorArguments.Length > 0)
-        {
-            var firstArg = filterAttr.ConstructorArguments[0];
-            if (firstArg.Kind == TypedConstantKind.Enum && firstArg.Value is int opVal)
-                return opVal;
-
-            if (filterAttr.ConstructorArguments.Length > 1)
-            {
-                var secondArg = filterAttr.ConstructorArguments[1];
-                if (secondArg.Kind == TypedConstantKind.Enum && secondArg.Value is int opVal2)
-                    return opVal2;
-            }
-        }
-        return 0; // Equals
-    }
-
-    private static int GetOperatorPriority(int op, IPropertySymbol prop)
-    {
-        return op switch
-        {
-            0 => prop.Type.SpecialType == SpecialType.System_String ? 2 : 1, // Equals
-            1 => 3, // NotEquals
-            2 or 3 or 4 or 5 => 4, // Greater/Less
-            11 => 5, // Between
-            9 => 10, // In
-            10 => 11, // NotIn
-            6 => 20, // StartsWith
-            7 => 21, // EndsWith
-            8 => 22, // Contains
-            _ => 50
-        };
-    }
-
-    private static List<string> GetTargetProperties(IPropertySymbol prop, AttributeData filterAttr)
-    {
-        // 1. Check named argument TargetProperties
-        var targetPropsNamed = filterAttr.NamedArguments.FirstOrDefault(kvp => kvp.Key == "TargetProperties");
-        if (targetPropsNamed.Key == "TargetProperties" && targetPropsNamed.Value.Kind == TypedConstantKind.Array)
-        {
-            var values = targetPropsNamed.Value.Values;
-            if (values.Length > 0)
-            {
-                var list = new List<string>();
-                foreach (var v in values)
-                {
-                    if (v.Value is string s && !string.IsNullOrWhiteSpace(s))
-                        list.Add(s);
-                }
-                if (list.Count > 0) return list;
-            }
-        }
-
-        // 2. Check named argument TargetProperty
-        var targetPropNamed = filterAttr.NamedArguments.FirstOrDefault(kvp => kvp.Key == "TargetProperty");
-        if (targetPropNamed.Key == "TargetProperty" && targetPropNamed.Value.Value is string targetStr && !string.IsNullOrWhiteSpace(targetStr))
-        {
-            return new List<string> { targetStr };
-        }
-
-        // 3. Check constructor argument of type string
-        foreach (var arg in filterAttr.ConstructorArguments)
-        {
-            if (arg.Kind == TypedConstantKind.Primitive && arg.Value is string s && !string.IsNullOrWhiteSpace(s))
-            {
-                return new List<string> { s };
-            }
-        }
-
-        // 4. Prefix resolution
-        var name = prop.Name;
-        foreach (var prefix in RangePrefixes)
-        {
-            if (name.StartsWith(prefix) && name.Length > prefix.Length && char.IsUpper(name[prefix.Length]))
-            {
-                return new List<string> { name.Substring(prefix.Length) };
-            }
-        }
-
-        return new List<string> { name };
-    }
-
-    private static void GenerateFastExpressionFilterLogic(
-        StringBuilder sb,
-        string safeClassIdent,
-        string entityType,
-        IPropertySymbol prop,
-        int op,
-        List<string> targetProps)
-    {
-        var propName = prop.Name;
-        var isNullableValue = prop.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
-        var isString = prop.Type.SpecialType == SpecialType.System_String;
-
-        string checkCondition;
-        string valAccess;
-
-        if (isNullableValue)
-        {
-            checkCondition = $"request.{propName}.HasValue";
-            valAccess = $"request.{propName}.Value";
-        }
-        else if (isString)
-        {
-            checkCondition = $"!string.IsNullOrEmpty(request.{propName})";
-            valAccess = $"request.{propName}";
-        }
-        else
-        {
-            checkCondition = $"request.{propName} != null";
-            valAccess = $"request.{propName}";
-        }
-
-        sb.AppendLine($"            if ({checkCondition})");
-        sb.AppendLine($"            {{");
-
-        if (targetProps.Count == 1)
-        {
-            var target = targetProps[0];
-            string memAccess = target.Contains(".")
-                ? $"Qryx.Expressions.Builders.ExpressionHelper.BuildMemberAccess(p, \"{target}\")"
-                : $"Expression.MakeMemberAccess(p, Prop_{safeClassIdent}_{target}!)";
-
-            sb.AppendLine($"                var mem = {memAccess};");
-            sb.AppendLine($"                var val = Expression.Constant({valAccess}, mem.Type);");
-
-            switch (op)
-            {
-                case 0: // Equals
-                    sb.AppendLine($"                var cond = Expression.Equal(mem, val);");
-                    break;
-                case 1: // NotEquals
-                    sb.AppendLine($"                var cond = Expression.NotEqual(mem, val);");
-                    break;
-                case 2: // GreaterThan
-                    sb.AppendLine($"                var cond = Expression.GreaterThan(mem, val);");
-                    break;
-                case 3: // GreaterThanOrEqual
-                    sb.AppendLine($"                var cond = Expression.GreaterThanOrEqual(mem, val);");
-                    break;
-                case 4: // LessThan
-                    sb.AppendLine($"                var cond = Expression.LessThan(mem, val);");
-                    break;
-                case 5: // LessThanOrEqual
-                    sb.AppendLine($"                var cond = Expression.LessThanOrEqual(mem, val);");
-                    break;
-                case 6: // StartsWith
-                    sb.AppendLine($"                var cond = Expression.Call(mem, StartsWithMethod, val);");
-                    break;
-                case 7: // EndsWith
-                    sb.AppendLine($"                var cond = Expression.Call(mem, EndsWithMethod, val);");
-                    break;
-                case 8: // Contains
-                    sb.AppendLine($"                var cond = Expression.Call(mem, ContainsMethod, val);");
-                    break;
-                default:
-                    sb.AppendLine($"                var cond = Expression.Equal(mem, val);");
-                    break;
-            }
-
-            sb.AppendLine($"                body = body == null ? cond : Expression.AndAlso(body, cond);");
-        }
-        else if (targetProps.Count > 1)
-        {
-            sb.AppendLine($"                var val = Expression.Constant({valAccess});");
-            sb.AppendLine($"                Expression? multiCond = null;");
-            for (int i = 0; i < targetProps.Count; i++)
-            {
-                var t = targetProps[i];
-                string memAccess = t.Contains(".")
-                    ? $"Qryx.Expressions.Builders.ExpressionHelper.BuildMemberAccess(p, \"{t}\")"
-                    : $"Expression.MakeMemberAccess(p, Prop_{safeClassIdent}_{t}!)";
-
-                string condVar = $"c{i}";
-                switch (op)
-                {
-                    case 6: // StartsWith
-                        sb.AppendLine($"                var {condVar} = Expression.Call({memAccess}, StartsWithMethod, val);");
-                        break;
-                    case 7: // EndsWith
-                        sb.AppendLine($"                var {condVar} = Expression.Call({memAccess}, EndsWithMethod, val);");
-                        break;
-                    case 8: // Contains
-                        sb.AppendLine($"                var {condVar} = Expression.Call({memAccess}, ContainsMethod, val);");
-                        break;
-                    default:
-                        sb.AppendLine($"                var {condVar} = Expression.Equal({memAccess}, val);");
-                        break;
-                }
-                sb.AppendLine($"                multiCond = multiCond == null ? (Expression){condVar} : Expression.OrElse(multiCond, {condVar});");
-            }
-            sb.AppendLine($"                if (multiCond != null) body = body == null ? multiCond : Expression.AndAlso(body, multiCond);");
-        }
-
-        sb.AppendLine($"            }}");
+        context.AddSource(model.HintName, SourceText.From(SourceEmitter.Emit(model, features), Encoding.UTF8));
     }
 }
