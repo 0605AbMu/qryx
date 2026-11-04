@@ -158,7 +158,7 @@ public class SortingAndPaginationTests
     }
 
     [Fact]
-    public void ApplyKeyset_ShouldWork_EvenIfCursorProperty_IsNotInSortableWhitelist()
+    public void ApplyKeyset_ByPrimaryKey_Works_EvenIfPrimaryKeyIsNotSortable()
     {
         var data = new List<WhitelistedEntity>
         {
@@ -167,13 +167,13 @@ public class SortingAndPaginationTests
             new() { Id = 3, Name = "C", SecretNote = "z" },
         }.AsQueryable();
 
-        // Id is not explicitly in [Sortable(nameof(Name))], but cursor pagination must always work
-        var keyset = PaginationBuilder.ApplyKeyset(data, afterCursor: 1, pageSize: 2, cursorProperty: "Id");
-        var list = keyset.ToList();
+        // No sortBy -> primary key ordering; Id is not [Sortable] but the default ordering always supports cursors
+        var plan = SortBuilder.ResolveSort<WhitelistedEntity>(sortBy: null);
+        var cursor = PaginationBuilder.CreateCursor(new WhitelistedEntity { Id = 1 }, plan)!;
 
-        Assert.Equal(2, list.Count);
-        Assert.Equal(2, list[0].Id);
-        Assert.Equal(3, list[1].Id);
+        var list = PaginationBuilder.ApplyKeyset(data, cursor, plan, pageSize: 2).ToList();
+
+        Assert.Equal([2, 3], list.Select(x => x.Id));
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public class SortingAndPaginationTests
         Assert.Equal("A", listName[0].Name);
 
         // Sorting by "SecretNote" is NOT whitelisted -> Throws if throwOnInvalidProperty: true
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<Qryx.Core.Exceptions.QryxRequestException>(() =>
             SortBuilder.Apply(data, "SecretNote", isDescending: false, throwOnInvalidProperty: true));
 
         // When throwOnInvalidProperty is false, it safely ignores unwhitelisted field and leaves original
@@ -210,19 +210,45 @@ public class SortingAndPaginationTests
 
         // StandardUser has NO [Sortable] attributes on any property.
         // Therefore, sorting by "Age" must be rejected!
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<Qryx.Core.Exceptions.QryxRequestException>(() =>
             SortBuilder.Apply(data, "Age", isDescending: false, throwOnInvalidProperty: true));
     }
 
     [Fact]
-    public void IntegerOverflow_InPagination_ShouldNotThrow()
+    public void IntegerOverflow_InPagination_ShouldNotThrow_WhenOffsetIsUnlimited()
+    {
+        // (int.MaxValue - 1) * 100 overflows int: clamped instead of ArgumentOutOfRangeException
+        Assert.Equal(int.MaxValue, PaginationBuilder.GetSkip(int.MaxValue, 100, maxOffset: null));
+    }
+
+    [Fact]
+    public void DeepOffset_ShouldBeRejected_ByDefaultMaxOffset()
     {
         var data = new List<StandardUser>().AsQueryable();
 
-        // Should not throw ArgumentOutOfRangeException
-        var paged = PaginationBuilder.ApplyOffset(data, page: int.MaxValue, pageSize: 100);
-        var list = paged.ToList();
-        Assert.Empty(list);
+        var ex = Assert.Throws<Qryx.Core.Exceptions.QryxRequestException>(() =>
+            PaginationBuilder.ApplyOffset(data, page: int.MaxValue, pageSize: 100));
+
+        Assert.Equal("Page", ex.ParamName);
+        Assert.Contains("afterCursor", ex.Reason);
+    }
+
+    [Theory]
+    [InlineData(101, 100, true)]   // offset 10,000 == limit -> allowed
+    [InlineData(102, 100, false)]  // offset 10,100 > limit
+    [InlineData(501, 20, true)]    // offset 10,000
+    [InlineData(502, 20, false)]
+    public void MaxOffset_Boundary(int page, int pageSize, bool allowed)
+    {
+        if (allowed)
+        {
+            Assert.Equal((page - 1) * pageSize, PaginationBuilder.GetSkip(page, pageSize, maxOffset: 10_000));
+        }
+        else
+        {
+            var ex = Assert.Throws<Qryx.Core.Exceptions.QryxRequestException>(() => PaginationBuilder.GetSkip(page, pageSize, maxOffset: 10_000));
+            Assert.Contains($"last allowed page is {10_000 / pageSize + 1}", ex.Reason);
+        }
     }
 
     public class TestDbContext : Microsoft.EntityFrameworkCore.DbContext
@@ -246,7 +272,7 @@ public class SortingAndPaginationTests
         await db.SaveChangesAsync();
 
         // Request with NO SortBy
-        var request = new TestRequest { Page = 1, PageSize = 2, SortBy = null };
+        var request = new TestRequest { Page = 1, PageSize = 2, SortBy = null, IncludeTotal = true };
 
         var result = await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users, request);
 
@@ -295,14 +321,18 @@ public class SortingAndPaginationTests
             new StandardUser { Id = 3, Name = "Charlie", Age = 30 });
         await db.SaveChangesAsync();
 
-        var request = new TestRequest { AfterCursor = "1", PageSize = 2, CursorProperty = "Id" };
+        // Page 1 (offset) returns the cursor that continues with keyset pagination
+        var first = await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users, new TestRequest { PageSize = 1 });
+        Assert.Equal([1], first.Items.Select(u => u.Id));
+        Assert.True(first.HasNext);
+        Assert.NotNull(first.NextCursor);
 
+        var request = new TestRequest { AfterCursor = first.NextCursor, PageSize = 2 };
         var result = await Qryx.EntityFramework.Extensions.QryxExtensions.ToPagedResultAsync(db.Users, request);
 
-        Assert.Equal(2, result.Items.Count);
-        Assert.Equal(2, result.Items[0].Id);
-        Assert.Equal(3, result.Items[1].Id);
+        Assert.Equal([2, 3], result.Items.Select(u => u.Id));
         Assert.False(result.HasNext);
+        Assert.Null(result.NextCursor);
     }
 
     public class MultiSortEntity
