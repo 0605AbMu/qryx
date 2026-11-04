@@ -19,4 +19,9 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
+
+  <!-- Documentation logic shared with Qryx.Swashbuckle (linked source, compiled as internal types into each package) -->
+  <ItemGroup>
+    <Compile Include="..\Qryx.ApiDocs.Shared\**\*.cs" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
