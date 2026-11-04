@@ -81,13 +81,12 @@ public record UserQueryDto : QryxRequest<User>
     public string? DepartmentName { get; init; }
 }
 
+/// <summary>
+/// Katta jadval uchun DTO: [NoTotal] tufayli klient ?includeTotal=true yuborsa ham COUNT(*) bajarilmaydi.
+/// </summary>
+[NoTotal]
 public record FastUserQueryDto : QryxRequest<User>
 {
-    public FastUserQueryDto()
-    {
-        IncludeTotalCount = false; // Single-query: COUNT(*) o'chiriladi, 3x tezlashadi
-    }
-
     [Sortable]
     [Filter(Op.Equals)]
     public UserStatus? Status { get; init; }

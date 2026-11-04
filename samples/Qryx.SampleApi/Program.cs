@@ -106,7 +106,8 @@ app.MapGet("/api/users", async (
 
 // =========================================================================
 // 2. Keyset / Cursor Pagination (O(log N) Index Seek)
-// Example: GET /api/users/cursor?afterCursor=2000&pageSize=20
+// Example: GET /api/users/cursor?sortBy=age desc&pageSize=20
+//          -> javobdagi "nextCursor" ni o'zgartirmasdan keyingi so'rovga bering: ?sortBy=age desc&afterCursor=<nextCursor>
 // =========================================================================
 app.MapGet("/api/users/cursor", async (
     [AsParameters] UserQueryDto query,
@@ -121,8 +122,8 @@ app.MapGet("/api/users/cursor", async (
 }).WithQryx();
 
 // =========================================================================
-// 3. Single-Query Pagination (IncludeTotalCount = false, 3x Tezroq)
-// Example: GET /api/users/fast?status=Active&page=1&pageSize=20
+// 3. Katta jadval: [NoTotal] DTO (includeTotal=true e'tiborsiz qoldiriladi, COUNT(*) hech qachon bajarilmaydi)
+// Example: GET /api/users/fast?status=Active&pageSize=20&includeTotal=true  -> javobda "total" bo'lmaydi
 // =========================================================================
 app.MapGet("/api/users/fast", async (
     [AsParameters] FastUserQueryDto query,
@@ -178,7 +179,7 @@ app.MapGet("/api/users/generated", async (
 {
     var users = await db.Users
         .AsNoTracking()
-        .ApplyGenerated(query) // 0.00 ns runtime reflection!
+        .ApplyGenerated(query) // compile-time generated plan; DTO mistakes are reported as QRYX001/QRYX002
         .ToListAsync(ct);
 
     return Results.Ok(users);
