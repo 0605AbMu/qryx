@@ -1,169 +1,49 @@
-using System.Collections;
-using System.Globalization;
-using System.Reflection;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Qryx.Core.Constants;
-using Qryx.Core.Contracts;
-using Qryx.Expressions.Metadata;
+using Microsoft.Extensions.DependencyInjection;
+using Qryx.AspNetCore.Internal;
+using Qryx.Expressions.Options;
 
 namespace Qryx.AspNetCore.ModelBinding;
 
 /// <summary>
-/// Model binder for QryxRequest DTOs in MVC Controllers.
+/// Model binder for Qryx request DTOs in MVC controllers.
+/// Binds <c>page</c>, <c>pageSize</c>, <c>sortBy</c> (repeated values are joined with ','), <c>isDescending</c>,
+/// <c>afterCursor</c>, <c>includeTotal</c> and every [Filter] property using cached,
+/// compiled, invariant-culture parsers (any <see cref="IParsable{TSelf}"/> such as <c>Range&lt;T&gt;</c>,
+/// <see cref="DateOnly"/>, <see cref="TimeOnly"/>, <see cref="DateTimeOffset"/>, <see cref="Guid"/>; enums by
+/// case-insensitive name or defined numeric value; nullable wrappers; arrays, lists and sets for multi-value keys).
 /// </summary>
+/// <remarks>
+/// Page and PageSize are normalized with the <see cref="QryxOptions"/> from DI (fallback <see cref="QryxOptions.Global"/>).
+/// Unparsable values are added to <c>ModelState</c> under the camelCase query key, so <c>[ApiController]</c>
+/// endpoints answer HTTP 400; without <c>[ApiController]</c> check <c>ModelState.IsValid</c> yourself.
+/// </remarks>
 public sealed class QryxDtoModelBinder(Type dtoType) : IModelBinder
 {
     public Task BindModelAsync(ModelBindingContext bindingContext)
     {
         ArgumentNullException.ThrowIfNull(bindingContext);
 
-        var dtoMetadata = MetadataCache.GetDtoMetadata(dtoType);
-        var dto = dtoMetadata.Factory();
+        var plan = QryxBindingPlan.For(dtoType);
+        var dto = plan.Metadata.Factory();
         if (dto == null)
         {
             bindingContext.Result = ModelBindingResult.Failed();
             return Task.CompletedTask;
         }
 
-        var valueProvider = bindingContext.ValueProvider;
+        var options = bindingContext.HttpContext.RequestServices.GetService<QryxOptions>() ?? QryxOptions.Global;
+        var errors = plan.Bind(dto, new ValueProviderSource(bindingContext.ValueProvider), options);
 
-        // Bind standard request properties
-        BindStandardProperties(dto, dtoMetadata, valueProvider);
-
-        // Bind filter properties
-        foreach (var filter in dtoMetadata.Filters)
+        if (errors != null)
         {
-            var propName = filter.DtoPropertyName;
-
-            if (filter.IsCollection && filter.CollectionElementType != null)
+            foreach (var error in errors)
             {
-                var colVal = BindCollection(propName, filter, valueProvider);
-                if (colVal != null)
-                {
-                    filter.Setter?.Invoke(dto, colVal);
-                }
-            }
-            else
-            {
-                var rawResult = valueProvider.GetValue(propName);
-                if (rawResult != ValueProviderResult.None && !string.IsNullOrWhiteSpace(rawResult.FirstValue))
-                {
-                    var converted = ConvertSingleValue(rawResult.FirstValue, filter.DtoPropertyType);
-                    if (converted != null)
-                    {
-                        filter.Setter?.Invoke(dto, converted);
-                    }
-                }
+                bindingContext.ModelState.TryAddModelError(error.Key, error.Message);
             }
         }
 
         bindingContext.Result = ModelBindingResult.Success(dto);
         return Task.CompletedTask;
-    }
-
-    private static void BindStandardProperties(object dto, DtoMetadata metadata, IValueProvider valueProvider)
-    {
-        var pageResult = valueProvider.GetValue("page");
-        if (pageResult != ValueProviderResult.None && int.TryParse(pageResult.FirstValue, out var page))
-        {
-            SetFast(metadata, dto, nameof(IQryxRequest<object>.Page), Math.Max(page, 1));
-        }
-
-        var pageSizeResult = valueProvider.GetValue("pageSize");
-        if (pageSizeResult != ValueProviderResult.None && int.TryParse(pageSizeResult.FirstValue, out var pageSize))
-        {
-            SetFast(metadata, dto, nameof(IQryxRequest<object>.PageSize), Math.Clamp(pageSize <= 0 ? QryxConstants.DefaultPageSize : pageSize, 1, QryxConstants.DefaultMaxPageSize));
-        }
-
-        var sortByResult = valueProvider.GetValue("sortBy");
-        if (sortByResult != ValueProviderResult.None && sortByResult.Length > 0)
-        {
-            var combinedSort = string.Join(",", sortByResult.Values.ToArray());
-            if (!string.IsNullOrWhiteSpace(combinedSort))
-            {
-                SetFast(metadata, dto, nameof(IQryxRequest<object>.SortBy), combinedSort);
-            }
-        }
-
-        var isDescResult = valueProvider.GetValue("isDescending");
-        if (isDescResult != ValueProviderResult.None && bool.TryParse(isDescResult.FirstValue, out var isDesc))
-        {
-            SetFast(metadata, dto, nameof(IQryxRequest<object>.IsDescending), isDesc);
-        }
-
-        var cursorResult = valueProvider.GetValue("afterCursor");
-        if (cursorResult != ValueProviderResult.None && !string.IsNullOrWhiteSpace(cursorResult.FirstValue))
-        {
-            SetFast(metadata, dto, nameof(IQryxRequest<object>.AfterCursor), cursorResult.FirstValue);
-        }
-    }
-
-    private static void SetFast(DtoMetadata metadata, object target, string propName, object? value)
-    {
-        if (metadata.StandardSetters.TryGetValue(propName, out var setter))
-        {
-            setter(target, value);
-        }
-    }
-
-    private static object? BindCollection(string propName, FilterPropertyMetadata filter, IValueProvider valueProvider)
-    {
-        var rawResult = valueProvider.GetValue(propName);
-        if (rawResult == ValueProviderResult.None || rawResult.Values.Count == 0)
-            return null;
-
-        var elementType = filter.CollectionElementType!;
-        var list = filter.CollectionFactory != null
-            ? filter.CollectionFactory()
-            : (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
-
-        foreach (var val in rawResult.Values)
-        {
-            if (string.IsNullOrWhiteSpace(val))
-                continue;
-
-            var converted = ConvertSingleValue(val, elementType);
-            if (converted != null)
-                list.Add(converted);
-        }
-
-        return list.Count > 0 ? list : null;
-    }
-
-    private static object? ConvertSingleValue(string str, Type targetType)
-    {
-        try
-        {
-            var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-            if (underlying.IsEnum)
-                return Enum.Parse(underlying, str, ignoreCase: true);
-
-            if (underlying == typeof(Guid))
-                return Guid.Parse(str);
-
-            return Convert.ChangeType(str, underlying, CultureInfo.InvariantCulture);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static void SetNamedProperty(object target, string propName, object? value)
-    {
-        var prop = target.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-        if (prop != null && prop.CanWrite)
-        {
-            prop.SetValue(target, value);
-        }
-    }
-
-    private static void SetPropertyValue(PropertyInfo prop, object target, object? value)
-    {
-        if (prop.CanWrite)
-        {
-            prop.SetValue(target, value);
-        }
     }
 }
