@@ -3,48 +3,27 @@ using System.Text.Json.Serialization;
 namespace Qryx.EntityFramework.Models;
 
 /// <summary>
-/// Compact pagination result envelope containing items, optional total, hasNext, and nextCursor.
+/// Pagination envelope: <c>{ "items": [...], "hasNext": true, "nextCursor": "...", "total": 42 }</c>.
+/// <list type="bullet">
+/// <item><c>nextCursor</c> is returned whenever a next page exists and the sort allows keyset pagination
+/// (every page, offset or keyset); pass it back unchanged as <c>afterCursor</c>.</item>
+/// <item><c>total</c> is returned only when the request asked for it (<c>includeTotal=true</c>) and the DTO is
+/// not marked <c>[NoTotal]</c>.</item>
+/// </list>
 /// </summary>
 /// <typeparam name="T">Item element type.</typeparam>
 public record PagedResult<T>
 {
-    private readonly bool? _hasNext;
-
     public IReadOnlyList<T> Items { get; init; } = [];
 
-    /// <summary>
-    /// Total count of matching items. Null when IncludeTotalCount = false or keyset pagination is used.
-    /// </summary>
+    /// <summary>Whether more rows follow this page.</summary>
+    public bool HasNext { get; init; }
+
+    /// <summary>Opaque keyset cursor for the next page (send it back as <c>afterCursor</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NextCursor { get; init; }
+
+    /// <summary>Total number of matching rows; only when requested with <c>includeTotal=true</c>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? Total { get; init; }
-
-    /// <summary>
-    /// Whether there are more items on subsequent pages or cursors.
-    /// </summary>
-    public bool HasNext
-    {
-        get => _hasNext ?? (Total.HasValue && PageSize > 0 && Page < TotalPages);
-        init => _hasNext = value;
-    }
-
-    /// <summary>
-    /// Keyset cursor value for the next page, if available.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public object? NextCursor { get; init; }
-
-    [JsonIgnore]
-    public int Page { get; init; }
-
-    [JsonIgnore]
-    public int PageSize { get; init; }
-
-    [JsonIgnore]
-    public int TotalCount => Total ?? 0;
-
-    [JsonIgnore]
-    public int TotalPages => Total.HasValue && PageSize > 0 ? (int)Math.Ceiling(Total.Value / (double)PageSize) : 0;
-
-    [JsonIgnore]
-    public bool HasPrevious => Page > 1;
 }
