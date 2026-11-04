@@ -9,7 +9,7 @@ namespace Qryx.Expressions.Metadata;
 /// </summary>
 public sealed class EntityMetadata
 {
-    private readonly ConcurrentDictionary<string, PropertyInfo?> _propertyCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PropertyInfo> _propertyCache = new(StringComparer.OrdinalIgnoreCase);
 
     public Type EntityType { get; }
     public IReadOnlyDictionary<string, PropertyInfo> Properties { get; }
@@ -79,25 +79,31 @@ public sealed class EntityMetadata
         if (string.IsNullOrWhiteSpace(propertyPath))
             return null;
 
-        return _propertyCache.GetOrAdd(propertyPath, path =>
+        if (_propertyCache.TryGetValue(propertyPath, out var cached))
+            return cached;
+
+        var parts = propertyPath.Split('.');
+        Type currentType = EntityType;
+        PropertyInfo? lastProp = null;
+
+        foreach (var part in parts)
         {
-            var parts = path.Split('.');
-            Type currentType = EntityType;
-            PropertyInfo? lastProp = null;
+            var prop = currentType.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (prop == null || !prop.CanRead)
+                return null; // Topilmagan yo'llar keshlanmaydi -> klient satrlari keshni cheksiz o'stira olmaydi
 
-            foreach (var part in parts)
-            {
-                var prop = currentType.GetProperty(part, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (prop == null || !prop.CanRead)
-                    return null;
+            lastProp = prop;
+            currentType = prop.PropertyType;
+        }
 
-                lastProp = prop;
-                currentType = prop.PropertyType;
-            }
+        if (lastProp != null)
+            _propertyCache.TryAdd(propertyPath, lastProp);
 
-            return lastProp;
-        });
+        return lastProp;
     }
+
+    /// <summary>Number of cached property paths (diagnostics / tests).</summary>
+    internal int CachedPropertyCount => _propertyCache.Count;
 
     public bool HasProperty(string propertyPath) => ResolveProperty(propertyPath) != null;
 
@@ -111,15 +117,18 @@ public sealed class EntityMetadata
         if (string.IsNullOrWhiteSpace(propertyPath))
             return null;
 
+        if (_getterCache.TryGetValue(propertyPath, out var cached))
+            return cached;
+
+        if (ResolveProperty(propertyPath) == null)
+            return null; // Topilmagan yo'llar keshlanmaydi
+
         return _getterCache.GetOrAdd(propertyPath, path =>
         {
-            var prop = ResolveProperty(path);
-            if (prop == null || !prop.CanRead)
-                return null;
-
+            // Nested paths (e.g. "Department.Name") are supported via the shared member-access builder
             var param = System.Linq.Expressions.Expression.Parameter(typeof(object), "obj");
             var cast = System.Linq.Expressions.Expression.Convert(param, EntityType);
-            var member = System.Linq.Expressions.Expression.Property(cast, prop);
+            var member = Builders.ExpressionHelper.BuildMemberAccess(cast, path);
             var box = System.Linq.Expressions.Expression.Convert(member, typeof(object));
             return System.Linq.Expressions.Expression.Lambda<Func<object, object?>>(box, param).Compile();
         });

@@ -146,7 +146,8 @@ public static class MetadataCache
             Factory = factory,
             Filters = filterProps,
             SortableProperties = sortableSet,
-            StandardSetters = standardSetters
+            StandardSetters = standardSetters,
+            AllowTotal = !dtoType.IsDefined(typeof(NoTotalAttribute), inherit: true)
         };
     }
 
