@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Qryx.EntityFramework.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Qryx.Core\Qryx.Core.csproj" />
     <ProjectReference Include="..\Qryx.Expressions\Qryx.Expressions.csproj" />
   </ItemGroup>
