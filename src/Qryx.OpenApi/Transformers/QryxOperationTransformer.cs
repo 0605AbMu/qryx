@@ -1,77 +1,25 @@
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
-using Qryx.Core.Constants;
-using Qryx.Core.Contracts;
+using Qryx.ApiDocs.Internal;
 
 namespace Qryx.OpenApi.Transformers;
 
 /// <summary>
-/// OpenAPI operation transformer that documents Qryx standard parameters (pagination, sorting).
+/// Microsoft.AspNetCore.OpenApi operation transformer that documents Qryx query DTOs (<c>IQryxRequest&lt;TEntity&gt;</c>)
+/// bound with <c>[AsParameters]</c> (Minimal APIs) or <c>[FromQuery]</c> (MVC): camelCase keys, every parameter
+/// optional, correct schemas for <c>Range&lt;T&gt;</c>, <c>QryxList&lt;T&gt;</c>, collections and enums, the filter
+/// operator of each <c>[Filter]</c> property and the sortable fields of <c>sortBy</c>.
 /// </summary>
 public sealed class QryxOperationTransformer : IOpenApiOperationTransformer
 {
+    /// <inheritdoc />
     public Task TransformAsync(OpenApiOperation operation, OpenApiOperationTransformerContext context, CancellationToken cancellationToken)
     {
-        if (operation.Parameters == null)
-            return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(context);
 
-        Type? qryxDtoType = null;
-
-        foreach (var param in context.Description.ParameterDescriptions)
-        {
-            if (param.Type != null && IsQryxRequest(param.Type))
-            {
-                qryxDtoType = param.Type;
-                break;
-            }
-
-            if (param.ModelMetadata?.ContainerType != null && IsQryxRequest(param.ModelMetadata.ContainerType))
-            {
-                qryxDtoType = param.ModelMetadata.ContainerType;
-                break;
-            }
-        }
-
-        if (qryxDtoType == null)
-            return Task.CompletedTask;
-
-        foreach (var param in operation.Parameters)
-        {
-            if (param is not OpenApiParameter openApiParam)
-                continue;
-
-            if (string.Equals(openApiParam.Name, "page", StringComparison.OrdinalIgnoreCase))
-            {
-                openApiParam.Description = "1-based page number for offset pagination. Minimum: 1.";
-            }
-            else if (string.Equals(openApiParam.Name, "pageSize", StringComparison.OrdinalIgnoreCase))
-            {
-                openApiParam.Description = $"Number of items per page. Clamped to maximum {QryxConstants.DefaultMaxPageSize}.";
-            }
-            else if (string.Equals(openApiParam.Name, "sortBy", StringComparison.OrdinalIgnoreCase))
-            {
-                openApiParam.Description = "Entity property name to sort by (e.g. 'CreatedAt' or 'Department.Name').";
-            }
-            else if (string.Equals(openApiParam.Name, "isDescending", StringComparison.OrdinalIgnoreCase))
-            {
-                openApiParam.Description = "Whether sort direction is descending. Default: false.";
-            }
-            else if (string.Equals(openApiParam.Name, "afterCursor", StringComparison.OrdinalIgnoreCase))
-            {
-                openApiParam.Description = "Cursor value for keyset pagination (e.g. last seen Id or timestamp).";
-            }
-        }
-
+        var replacedSchemaIds = context.Document != null ? QryxUnusedSchemas.For(context.Document) : null;
+        QryxOperationDocumenter.Apply(operation, context.Description, replacedSchemaIds);
         return Task.CompletedTask;
-    }
-
-    private static bool IsQryxRequest(Type type)
-    {
-        foreach (var iface in type.GetInterfaces())
-        {
-            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IQryxRequest<>))
-                return true;
-        }
-        return false;
     }
 }
